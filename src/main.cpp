@@ -11,6 +11,8 @@
 
 AES aes;
 AES aesDecript;
+HTTPClient http;
+WiFiClient client;
 
 #define EEPROM_ADDRESS 0x50
 static Eeprom24C04_16 eeprom(EEPROM_ADDRESS);
@@ -93,27 +95,22 @@ String encryptData(String message)
   gen_iv(ivByteArray);
   b64_encode(b64dataIV, (char *)ivByteArray, N_BLOCK); // Encode IV B64
 
-  int b64len = b64_encode(b64dataMessage, (char *)message.c_str(), message.length()); // Encode Message B64
-
-  aes.do_aes_encrypt((byte *)b64dataMessage, b64len, cipher, key, 128, ivByteArray); // Encrypt Message
+  aes.do_aes_encrypt((byte *)message.c_str(), message.length(), cipher, key, 128, ivByteArray); // Encrypt Message
 
   b64_encode(b64dataMessage, (char *)cipher, aes.get_size()); // Encode Encrypted Message
 
-  String catcon = String(b64dataIV) + "%" + String(b64dataMessage); // Concat IV_B64 and Message (Encoded-Encrypted-Encoded)
-  return String(b64dataMessage);                                    // Send data
+  return String(b64dataIV) + "%" + String(b64dataMessage); // Send data
 }
 
 String decryptData(String data)
 {
-  char decodedData[632];
-  char ivDec64[64];
-  char dataDec[632];
-  byte out[632];
+  char decodedData[1500];
+  char dataDec[1500];
+  byte out[1500];
   char ivDec[64];
+  char ivDec64[64];
 
-  b64_decode(decodedData, (char *)data.c_str(), data.length());
-
-  char *token = strtok(decodedData, "%"); // Explode data
+  char *token = strtok((char *)data.c_str(), "%"); // Explode data
   byte tokenCounter = 0;
   while (token != NULL)
   {
@@ -133,11 +130,13 @@ String decryptData(String data)
 
   int decodeLength = b64_decode(decodedData, dataDec, strlen(dataDec));
 
+  Serial.println(decodeLength);
   aes.do_aes_decrypt((byte *)decodedData, decodeLength, out, key, 128, (byte *)ivDec);
-
-  b64_decode(decodedData, (char *)out, aes.get_size());
-
-  return String(decodedData);
+  int i = 0;
+  while ((out[i] < 128 && out[i] > 31) || out[i] == 194 || out[i] == 182)
+    i++;
+  out[i] = '\0';
+  return String((char *)out);
 }
 
 void storeString(int addrOffset, const String &strToWrite)
@@ -250,7 +249,7 @@ void initiateSoftAP()
   server.begin();
 }
 
-bool initiateStation(String ssid, String pass)
+bool initiateClient(String ssid, String pass)
 {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
@@ -286,6 +285,43 @@ void setup(void)
   delay(100);
   eeprom.initialize();
   loadInfo();
+  initiateClient("aefocs", "000354453000");
+  while (true)
+  {
+    ////////
+    Serial.print("[HTTP] begin...\n"); // configure traged server and url
+    http.begin(client, "http://192.168.2.110:8080/otoma/teste.php");
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    Serial.print("[HTTP] POST...\n");
+    // start connection and send HTTP header
+    String httpRequestData = "q=" + encryptData("soto¶bruh¶hello");
+
+    // Send HTTP POST request
+    int httpCode = http.POST(httpRequestData);
+    // httpCode will be negative on error
+    if (httpCode > 0)
+    {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("[HTTP] POST... code: %d\n", httpCode);
+
+      // file found at server
+      if (httpCode == HTTP_CODE_OK)
+      {
+        String inputt = http.getString();
+        Serial.printf("raw : %s\n", inputt.c_str());
+        String payload = decryptData(inputt);
+        Serial.printf("decrypted : %s\n", payload.c_str());
+      }
+    }
+    else
+    {
+      Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    http.end();
+    delay(3000);
+    ////////////////////////
+  }
 
   Serial.println();
   Serial.print("storedFirstByte : ");
@@ -309,7 +345,7 @@ void setup(void)
   }
   else if (storedFirstByte == 1)
   {
-    initiateStation(storedSSID, storedWifiPass);
+    initiateClient(storedSSID, storedWifiPass);
   }
 }
 
@@ -323,7 +359,6 @@ void loop(void)
     loopMillis = millis();
     if ((WiFi.status() == WL_CONNECTED))
     {
-      HTTPClient http;
 
       Serial.print("[HTTP] begin...\n");
 
@@ -540,7 +575,7 @@ void handleLogin()
     Serial.println("breaking....");
   }
 
-  timeOutFlag = !(initiateStation(ssid, password));
+  timeOutFlag = !(initiateClient(ssid, password));
   delay(100);
   if (timeOutFlag)
   {
@@ -549,8 +584,6 @@ void handleLogin()
   else
   {
     ////////
-    HTTPClient http;
-    WiFiClient client;
     Serial.print("[HTTP] begin...\n"); // configure traged server and url
     http.begin(client, "http://192.168.7.65:8080/identifyDevice.php");
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
@@ -578,7 +611,6 @@ void handleLogin()
         if (payload.indexOf("CONNECTED") >= 0)
         {
           status = 4;
-
           eeprom.writeByte(0, 1);
           storeString(1, ssid);
           storeString(33, password);
