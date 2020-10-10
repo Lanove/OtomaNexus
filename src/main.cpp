@@ -8,14 +8,17 @@
 #include "b64.h"
 #include <Wire.h>
 #include <Eeprom24C04_16.h>
+#include <ArduinoJson.h>
+#include <html.h>
+
+#define EEPROM_ADDRESS 0x50
 
 AES aes;
 AES aesDecript;
 HTTPClient http;
 WiFiClient client;
-
-#define EEPROM_ADDRESS 0x50
 static Eeprom24C04_16 eeprom(EEPROM_ADDRESS);
+ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
 
 String storedUsername;
 String storedSSID;
@@ -35,7 +38,19 @@ byte key[] = {0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6, 0xAB, 0xF7, 0x15, 
 // The IV's always have the same size used for AES: 16 bytes
 byte ivByteArray[16] = {48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
 
-ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
+uint8_t getrnd();
+char *multi_tok(char *input, char *delimiter);
+void gen_iv(byte *iv);
+String encryptData(String message);
+String decryptData(String data);
+void storeString(int addrOffset, const String &strToWrite);
+String readString(int addrOffset);
+void loadInfo();
+void processIPString(String *buffer, String ipdata);
+void initiateSoftAP();
+bool initiateClient(String ssid, String pass);
+String fetchURL(String URL, String payload, int &responseCode);
+void writeByteEEPROM(int addr, byte data);
 
 void handleRoot(); // function prototypes for HTTP handlers
 void handleLogin();
@@ -45,6 +60,135 @@ void handlePasswordVisibility();
 void handleNotFound();
 String htmlCode();
 bool serverClosed;
+
+void setup(void)
+{
+  Serial.begin(74880); // Start the Serial communication to send messages to the computer
+  delay(10);
+  Serial.println('\n');
+
+  // pinMode(LED_BUILTIN, OUTPUT);
+  delay(100);
+  eeprom.initialize();
+  loadInfo();
+
+  Serial.println();
+  Serial.print("storedFirstByte : ");
+  Serial.println(storedFirstByte);
+  Serial.print("storedSoftSSID : ");
+  Serial.println(storedSoftSSID);
+  Serial.print("storedSoftWifiPass : ");
+  Serial.println(storedSoftWifiPass);
+  Serial.print("storedSSID : ");
+  Serial.println(storedSSID);
+  Serial.print("storedWifiPass : ");
+  Serial.println(storedWifiPass);
+  Serial.print("storedUsername : ");
+  Serial.println(storedUsername);
+  Serial.print("storedIPAddress : ");
+  Serial.println(storedIPAddress);
+  Serial.println(FPSTR(htmlDoc));
+  Serial.printf("Length : %u", strlen_P(htmlDoc));
+  delay(99999999);
+  if (storedFirstByte == 0)
+  {
+    initiateSoftAP();
+  }
+  else if (storedFirstByte == 1)
+  {
+    if (initiateClient(storedSSID, storedWifiPass))
+      ;
+    else
+      initiateSoftAP();
+  }
+}
+
+unsigned long loopMillis;
+void loop(void)
+{
+  if (!serverClosed)
+    server.handleClient(); // Listen for HTTP requests from clients
+  if (storedFirstByte == 1 && millis() - loopMillis >= 1000)
+  {
+    loopMillis = millis();
+    if ((WiFi.status() == WL_CONNECTED))
+    {
+
+      Serial.print("[HTTP] begin...\n");
+
+      WiFiClient client;
+      http.begin(client, "http://192.168.7.65:8080/db_getLastStatus.php?token=keSvw4Hwt6");
+
+      Serial.print("[HTTP] GET...\n");
+      // start connection and send HTTP header
+      int httpCode = http.GET();
+
+      // httpCode will be negative on error
+      if (httpCode > 0)
+      {
+        // HTTP header has been send and Server response header has been handled
+        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+        // file found at server
+        if (httpCode == HTTP_CODE_OK)
+        {
+          String payload = http.getString();
+          Serial.println(payload);
+          if (payload == "OFF")
+            digitalWrite(LED_BUILTIN, HIGH);
+          else if (payload == "ON")
+            digitalWrite(LED_BUILTIN, LOW);
+        }
+      }
+      else
+      {
+        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+      }
+
+      http.end();
+    }
+    else
+    {
+      Serial.println("DISCONNECTED");
+    }
+  }
+}
+
+String fetchURL(String URL, String data, int &responseCode)
+{
+  WiFiClient client;
+  HTTPClient http;
+
+  Serial.print("[HTTP] begin...\n");
+  // configure traged server and url
+  http.begin(client, URL); //HTTP
+  http.addHeader("Content-Type", "application/json");
+
+  Serial.print("[HTTP] POST...\n");
+  // start connection and send HTTP header and body
+  int httpCode = http.POST(data);
+  responseCode = httpCode;
+
+  // httpCode will be negative on error
+  if (httpCode > 0)
+  {
+    // HTTP header has been send and Server response header has been handled
+    Serial.printf("[HTTP] POST... code: %d\n", httpCode);
+
+    // file found at server
+    if (httpCode == HTTP_CODE_OK)
+    {
+      return http.getString();
+    }
+  }
+  else
+  {
+    Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+
+  http.end();
+  return "";
+}
 
 uint8_t getrnd()
 {
@@ -161,12 +305,24 @@ String readString(int addrOffset)
 void loadInfo()
 {
   storedFirstByte = eeprom.readByte(0);
-  storedSoftSSID = readString(108);
-  storedSoftWifiPass = readString(140);
   storedSSID = readString(1);
   storedWifiPass = readString(33);
+  storedSoftSSID = readString(108);
+  storedSoftWifiPass = readString(140);
   storedUsername = readString(205);
   storedIPAddress = readString(237);
+  if (storedSSID == " ")
+    storedSSID = "";
+  if (storedWifiPass == " ")
+    storedWifiPass = "";
+  if (storedSoftSSID == " ")
+    storedSoftSSID = "";
+  if (storedSoftWifiPass == " ")
+    storedSoftWifiPass = "";
+  if (storedUsername == " ")
+    storedUsername = "";
+  if (storedIPAddress == " ")
+    storedIPAddress = "192.168.4.1";
 }
 
 void processIPString(String *buffer, String ipdata)
@@ -273,131 +429,6 @@ bool initiateClient(String ssid, String pass)
     }
   }
   return successFlag;
-}
-
-void setup(void)
-{
-  Serial.begin(74880); // Start the Serial communication to send messages to the computer
-  delay(10);
-  Serial.println('\n');
-
-  // pinMode(LED_BUILTIN, OUTPUT);
-  delay(100);
-  eeprom.initialize();
-  loadInfo();
-  initiateClient("aefocs", "000354453000");
-  while (true)
-  {
-    ////////
-    Serial.print("[HTTP] begin...\n"); // configure traged server and url
-    http.begin(client, "http://192.168.2.110:8080/otoma/teste.php");
-    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    Serial.print("[HTTP] POST...\n");
-    // start connection and send HTTP header
-    String httpRequestData = "q=" + encryptData("soto¶bruh¶hello");
-
-    // Send HTTP POST request
-    int httpCode = http.POST(httpRequestData);
-    // httpCode will be negative on error
-    if (httpCode > 0)
-    {
-      // HTTP header has been send and Server response header has been handled
-      Serial.printf("[HTTP] POST... code: %d\n", httpCode);
-
-      // file found at server
-      if (httpCode == HTTP_CODE_OK)
-      {
-        String inputt = http.getString();
-        Serial.printf("raw : %s\n", inputt.c_str());
-        String payload = decryptData(inputt);
-        Serial.printf("decrypted : %s\n", payload.c_str());
-      }
-    }
-    else
-    {
-      Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
-    }
-
-    http.end();
-    delay(3000);
-    ////////////////////////
-  }
-
-  Serial.println();
-  Serial.print("storedFirstByte : ");
-  Serial.println(storedFirstByte);
-  Serial.print("storedSoftSSID : ");
-  Serial.println(storedSoftSSID);
-  Serial.print("storedSoftWifiPass : ");
-  Serial.println(storedSoftWifiPass);
-  Serial.print("storedSSID : ");
-  Serial.println(storedSSID);
-  Serial.print("storedWifiPass : ");
-  Serial.println(storedWifiPass);
-  Serial.print("storedUsername : ");
-  Serial.println(storedUsername);
-  Serial.print("storedIPAddress : ");
-  Serial.println(storedIPAddress);
-
-  if (storedFirstByte == 0)
-  {
-    initiateSoftAP();
-  }
-  else if (storedFirstByte == 1)
-  {
-    initiateClient(storedSSID, storedWifiPass);
-  }
-}
-
-unsigned long loopMillis;
-void loop(void)
-{
-  if (!serverClosed)
-    server.handleClient(); // Listen for HTTP requests from clients
-  if (storedFirstByte == 1 && millis() - loopMillis >= 1000)
-  {
-    loopMillis = millis();
-    if ((WiFi.status() == WL_CONNECTED))
-    {
-
-      Serial.print("[HTTP] begin...\n");
-
-      WiFiClient client;
-      http.begin(client, "http://192.168.7.65:8080/db_getLastStatus.php?token=keSvw4Hwt6");
-
-      Serial.print("[HTTP] GET...\n");
-      // start connection and send HTTP header
-      int httpCode = http.GET();
-
-      // httpCode will be negative on error
-      if (httpCode > 0)
-      {
-        // HTTP header has been send and Server response header has been handled
-        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
-
-        // file found at server
-        if (httpCode == HTTP_CODE_OK)
-        {
-          String payload = http.getString();
-          Serial.println(payload);
-          if (payload == "OFF")
-            digitalWrite(LED_BUILTIN, HIGH);
-          else if (payload == "ON")
-            digitalWrite(LED_BUILTIN, LOW);
-        }
-      }
-      else
-      {
-        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
-      }
-
-      http.end();
-    }
-    else
-    {
-      Serial.println("DISCONNECTED");
-    }
-  }
 }
 
 void handleRoot()
@@ -545,25 +576,21 @@ void handleLogin()
     errorCode += "<span style=\"color: var(--failcolor);\">SSID WiFi tidak boleh kosong, isi dengan SSID atau nama WiFi yang akan anda pakai</span><br/>";
     status = 5;
   }
-
   if (username == "")
   {
     errorCode += "<span style=\"color: var(--failcolor);\">Username akun tidak boleh kosong</span><br/>";
     status = 5;
   }
-
   if (userpass == "")
   {
     errorCode += "<span style=\"color: var(--failcolor);\">Password akun tidak boleh kosong</span><br/>";
     status = 5;
   }
-
   if (status == 5)
   {
     server.send(200, "text/html", htmlCode());
     return;
   }
-
   status = 2;
   server.send(200, "text/html", htmlCode());
   delay(100);
@@ -574,7 +601,6 @@ void handleLogin()
     delay(500);
     Serial.println("breaking....");
   }
-
   timeOutFlag = !(initiateClient(ssid, password));
   delay(100);
   if (timeOutFlag)
@@ -585,16 +611,19 @@ void handleLogin()
   {
     ////////
     Serial.print("[HTTP] begin...\n"); // configure traged server and url
-    http.begin(client, "http://192.168.7.65:8080/identifyDevice.php");
-    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    Serial.print("[HTTP] POST...\n");
-    // start connection and send HTTP header
-    String message = deviceToken + "¶" + username + "¶" + userpass;
-    String send = encryptData(message);
-    String httpRequestData = "q=" + send;
-
+    int httpCode;
+    const size_t capacity = JSON_OBJECT_SIZE(5);
+    DynamicJsonDocument doc(capacity);
+    String json = "";
+    doc["username"] = username;
+    doc["password"] = userpass;
+    doc["devicetoken"] = deviceToken;
+    doc["softssid"] = storedSoftSSID;
+    doc["softpw"] = storedSoftWifiPass;
+    serializeJson(doc, json);
+    String payload = fetchURL("http://192.168.2.110:8080/otoma/teste.php", json, httpCode);
+    Serial.println(payload);
     // Send HTTP POST request
-    int httpCode = http.POST(httpRequestData);
     // httpCode will be negative on error
     if (httpCode > 0)
     {
@@ -604,10 +633,6 @@ void handleLogin()
       // file found at server
       if (httpCode == HTTP_CODE_OK)
       {
-        String inputt = http.getString();
-        Serial.println(inputt);
-        String payload = decryptData(inputt);
-        Serial.println(payload);
         if (payload.indexOf("CONNECTED") >= 0)
         {
           status = 4;
@@ -631,21 +656,13 @@ void handleLogin()
           status = 7;
         }
         else if (payload.indexOf("PASS ERROR") >= 0)
-        {
           status = 8;
-        }
         else if (payload.indexOf("INVALID") >= 0)
-        {
           status = 6;
-        }
         else if (payload.indexOf("DUPLICATE") >= 0)
-        {
           status = 10;
-        }
         else
-        {
           status = 9;
-        }
       }
     }
     else
@@ -653,11 +670,8 @@ void handleLogin()
       Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
       status = 9;
     }
-
-    http.end();
     ////////////////////////
   }
-
   delay(100);
   initiateSoftAP();
   server.send(200, "text/html", htmlCode());
