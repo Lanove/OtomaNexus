@@ -83,7 +83,6 @@ void setup(void)
 
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
-  writeFB(0);
   eeprom.initialize();
   loadInfo();
   closeClient();
@@ -105,13 +104,20 @@ void setup(void)
   Serial.print("storedIPAddress : ");
   Serial.println(storedIPAddress);
 
-  if (!initiateClient(storedSSID, storedWifiPass)) // First try on connecting to stored SSID
-  {
-    if (!initiateClient(storedSSID, storedWifiPass))
-      initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
-  }
   if (readFB() == 0)
+  {
+    initiateSoftAP();
     deployWebServer(); // Deploy web server
+  }
+  else
+  {
+    if (!initiateClient(storedSSID, storedWifiPass)) // First try on connecting to stored SSID
+    {
+      if (!initiateClient(storedSSID, storedWifiPass))
+        initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
+      deployWebServer();
+    }
+  }
 }
 
 unsigned long loopMillis;
@@ -331,6 +337,7 @@ byte readFB()
 void writeFB(byte data)
 {
   eeprom.writeByte(0, data);
+  delay(10);
 }
 
 String readFromEEPROM(byte what)
@@ -562,13 +569,14 @@ void pgRestart()
   ESP.reset();
 }
 
-String responseStatus = "";
+String responseStatus = "empty";
 void pgAccInfo()
 {
   String usrn = server.arg("usrn");
   String unpw = server.arg("unpw");
   String ssid = server.arg("ssid");
   String wfpw = server.arg("wfpw");
+  Serial.printf("Username : %s\nPassword : %s\nSSID : %s\nWiFiPW : %s\n", usrn.c_str(), unpw.c_str(), ssid.c_str(), wfpw.c_str());
   if (initiateClient(ssid, wfpw))
   {
     Serial.print("[HTTP] begin...\n");
@@ -576,11 +584,11 @@ void pgAccInfo()
     const size_t capacity = JSON_OBJECT_SIZE(5);
     DynamicJsonDocument doc(capacity);
     String json = "";
-    doc["username"] = usrn;
-    doc["password"] = unpw;
-    doc["devicetoken"] = DEVICETOKEN;
-    doc["softssid"] = storedSoftSSID;
-    doc["softpw"] = storedSoftWifiPass;
+    doc["username"] = usrn.c_str();
+    doc["password"] = unpw.c_str();
+    doc["devicetoken"] = String(DEVICETOKEN).c_str();
+    doc["softssid"] = storedSoftSSID.c_str();
+    doc["softpw"] = storedSoftWifiPass.c_str();
     serializeJson(doc, json);
     responseStatus = fetchURL("http://192.168.2.110:8080/otoma/teste.php", json, httpCode);
     if (httpCode == HTTP_CODE_OK)
@@ -610,11 +618,16 @@ void pgReqStatus()
   const size_t capacity = JSON_OBJECT_SIZE(4);
   DynamicJsonDocument doc(capacity);
   String json = "";
-  doc["usrn"] = readFromEEPROM(USERNAME);
-  doc["ssid"] = readFromEEPROM(WIFISSID);
-  doc["wfpw"] = readFromEEPROM(WIFIPW);
-  doc["message"] = responseStatus;
+  doc["usrn"] = storedUsername.c_str();
+  doc["ssid"] = storedSSID.c_str();
+  doc["wfpw"] = storedWifiPass.c_str();
+  doc["message"] = responseStatus.c_str();
+  Serial.println(storedUsername);
+  Serial.println(storedSSID);
+  Serial.println(storedWifiPass);
+  Serial.println(responseStatus);
   serializeJson(doc, json);
+  Serial.printf("Transferring JSON : %s\n", json.c_str());
   server.send(200, "application/json", json);
 }
 
