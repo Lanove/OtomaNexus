@@ -3,6 +3,8 @@ Todo :
 - Add softSSID,softPW,softIPAddress at setting menu of otoma web
 - Check last update of ESP8266 on server to notify the user when the ESP8266 is not updating for more than 5 minute (because disconnect)
 - Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
+- Add buzzer notification for WiFi fail connect, disconnect, time out.
+- Add LED status for WiFi connecting, and setup status
 */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -32,6 +34,8 @@ Todo :
 static Eeprom24C04_16 eeprom(EEPROM_ADDRESS);
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
 WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200); // 25200 for UTC+7, 3600*(UTC)
+RTC_DS1307 rtc;
 
 String storedUsername;
 String storedSSID;
@@ -83,8 +87,17 @@ void setup(void)
   Serial.println('\n');
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
-
   debugMemory();
+  if (!rtc.begin())
+  {
+    Serial.println("Couldn't Start RTC!");
+    // failed to init rtc
+    // add some loud ass error buzzer here
+    // rtc is important element, so stop right here if something is wrong
+    while (true)
+    {
+    }
+  }
   eeprom.initialize();
   loadInfo();
   Serial.println();
@@ -111,24 +124,46 @@ void setup(void)
   }
   else
   {
+    // The WiFi connection take 90 seconds maximum
     if (!initiateClient(storedSSID, storedWifiPass)) // First try on connecting to stored SSID
     {
       if (!initiateClient(storedSSID, storedWifiPass))
       {
-        initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
-        deployWebServer();
-        writeFB(0);
+        if (!initiateClient(storedSSID, storedWifiPass))
+        {
+          initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
+          deployWebServer();
+          writeFB(0);
+        }
+      }
+    }
+  }
+  if (isWifiConnected())
+  {
+    timeClient.begin(); // If WiFi connection success, start NTP timeClient
+    if (timeClient.forceUpdate())
+    {
+      rtc.adjust(DateTime(timeClient.getEpochTime()));
+    }
+    else
+    {
+      if (!rtc.isrunning())
+      {
+
+        Serial.println("Could'nt Initiate RTC!");
+        // We're fucked up my friend, RTC is not running and can't fetch NTP time, so we'll stop right there too
+        // failed to init rtc
+        // add some loud ass error buzzer here
+        // rtc is important element, so stop right here if something is wrong
+        while (true)
+        {
+        }
       }
     }
   }
   debugMemory();
 }
 
-unsigned long dt;
-unsigned long dtt;
-unsigned long failReq;
-unsigned long successReq;
-unsigned long totalReq;
 void loop(void)
 {
   if (serverAvailable)
@@ -139,10 +174,17 @@ void loop(void)
   {
     if (isWifiConnected())
     {
-      const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(2);
+      DateTime now = rtc.now();
+      if (timeClient.update())
+      {
+        // If unixtime of RTC is deviating + or - 30 seconds than NTP time then readjust RTC
+        if (timeClient.getEpochTime() > now.unixtime() + 10 || timeClient.getEpochTime() < now.unixtime() - 10)
+          rtc.adjust(DateTime(timeClient.getEpochTime()));
+      }
+      const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(3);
       DynamicJsonDocument doc(capacity);
       String json;
-
+      Serial.printf("%d/%d/%d %d:%d:%d\n", now.day(), now.month(), now.year(), now.hour(), now.minute(), now.second());
       // Type is splitted by 'n'
       // t means temperature
       // h means humidity
@@ -150,7 +192,7 @@ void loop(void)
       // the highest order is t and goes lower to s
       // so tnhns means ESP8266 is sending temperature and humidity
       doc["type"] = "tnhns";
-
+      doc["unix"] = now.unixtime();
       JsonArray data = doc.createNestedArray("data");
       data.add(37.16);
       data.add(80.2);
@@ -163,17 +205,7 @@ void loop(void)
 
       int httpCode;
       String response = fetchURL(FPSTR(requestURL), json, httpCode);
-      if (httpCode > 0)
-      {
-        if (httpCode == HTTP_CODE_OK)
-          successReq++;
-      }
-      else
-      {
-        failReq++;
-      }
-      totalReq++;
-      Serial.printf("%s Response : %s\nT:%lu---F:%lu-S:%lu\n%lums\n", (char *)FPSTR(requestURL), response.c_str(), totalReq, failReq, successReq, dt);
+      Serial.printf("Response : %s\n", response.c_str());
       if (response == "forget")
       {
         writeFB(0);
