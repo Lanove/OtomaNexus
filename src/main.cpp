@@ -5,6 +5,34 @@ Todo :
 - Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
 - Add buzzer notification for WiFi fail connect, disconnect, time out.
 - Add LED status for WiFi connecting, and setup status
+- Create Shift Register API
+- Create Analog Input API
+- Remove != and == from comparator list
+- Lol, the name is operator, not comparator. to be exact, it was relational operators
+
+Idea : 
+- do something like this on automation program
+bool condition;
+If(program == "suhu")
+  if(operator == ">")
+    cond = (suhu>x)
+  If(operator == "<")
+    cond = (suhu<x)
+  If(operator == "==")
+    cond = (suhu==x)
+endif
+If(program == "jadwal")
+  cond = (time > jadwalstart && time < jadwalstop)
+
+- Proposed logic of automation program
+Lk program e Tanggal Waktu or Jadwal Harian, EEPROM e yo nyimpen flag.
+Jika waktu saiki memenuhi kondisi terus keadaan output ga sesuai karo aksi, flag e dadi true karo eksekusi aksi.
+terus lha lk wes kondisi tidak terpenuhi (waktune ga pas or smth else), flag e dicek.
+lha lk flag e jk 1, maka eksekusi anti-aksi terus flag e dirubah dadi 0
+tsumari, dia punya anti-aksi lk wes ga memenuhi kondisi, tapi hanya one-shot saja
+
+Ngubah keadaan output pas akhir program, kinda like ladder logic
+
 */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
