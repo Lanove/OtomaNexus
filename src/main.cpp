@@ -1,15 +1,22 @@
+/*
+Todo :
+- Add softSSID,softPW,softIPAddress at setting menu of otoma web
+- Check last update of ESP8266 on server to notify the user when the ESP8266 is not updating for more than 5 minute (because disconnect)
+- Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
+*/
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
-#include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
-#include "AES.h"
-#include "b64.h"
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+#include <html.h>
+
 #include <Wire.h>
+#include <RTClib.h>
 #include <Eeprom24C04_16.h>
 #include <ArduinoJson.h>
-#include <html.h>
 
 #define EEPROM_ADDRESS 0x50
 #define DEVICETOKEN "te9Dz1MfFK"
@@ -22,52 +29,36 @@
 #define IPADDRESS 6
 #define GATEWAY 7
 
-AES aes;
-AES aesDecript;
-HTTPClient http;
-WiFiClient client;
 static Eeprom24C04_16 eeprom(EEPROM_ADDRESS);
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
+WiFiUDP ntpUDP;
 
 String storedUsername;
 String storedSSID;
 String storedWifiPass;
 String storedSoftSSID;
 String storedSoftWifiPass;
-String storedIPAddress;
 byte storedFirstByte;
-
 bool serverAvailable;
 bool triedLog = false;
 
-// The necessary encryption information: First the pre-shared key.
-byte key[] = {0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6, 0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C};
-// The IV's always have the same size used for AES: 16 bytes
-byte ivByteArray[16] = {48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
-
-uint8_t getrnd();
-char *multi_tok(char *input, char *delimiter);
-void gen_iv(byte *iv);
-String encryptData(String message);
-String decryptData(String data);
+void debugMemory(); // Function to check free stack and heap remaining
 void storeString(int addrOffset, const String &strToWrite);
-String readString(int addrOffset);
-String readFromEEPROM(byte what);
-void writeToEEPROM(byte what, String strToWrite);
+const String readString(int addrOffset);
+const String readFromEEPROM(byte what);
+void writeToEEPROM(byte what, const String &strToWrite);
 byte readFB();
 void writeFB(byte data);
 void loadInfo();
-void processIPString(String *buffer, String ipdata);
 bool initiateSoftAP();
-bool initiateClient(String ssid, String pass);
+bool initiateClient(const String &ssid, const String &pass);
 void deployWebServer();
 void closeServer();
 bool closeSoftAP();
 bool closeClient();
 bool isWifiConnected();
-String fetchURL(String URL, String payload, int &responseCode);
+const String fetchURL(const String &URL, const String &payload, int &responseCode);
 void writeByteEEPROM(int addr, byte data);
-
 void pgRoot(); // function prototypes for HTTP handlers
 void pgInit();
 void pgRestart();
@@ -75,19 +66,27 @@ void pgReqStatus();
 void pgAccInfo();
 void handleNotFound();
 
+void debugMemory()
+{
+  Serial.printf("Stack : %d\nHeap : %d\n", ESP.getFreeContStack(), ESP.getFreeHeap());
+}
+
 void setup(void)
 {
+  storedUsername.reserve(32);
+  storedSSID.reserve(32);
+  storedWifiPass.reserve(64);
+  storedSoftSSID.reserve(32);
+  storedSoftWifiPass.reserve(64);
   Serial.begin(74880); // Start the Serial communication to send messages to the computer
   delay(10);
   Serial.println('\n');
-
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
+
+  debugMemory();
   eeprom.initialize();
   loadInfo();
-  closeClient();
-  closeSoftAP();
-  closeServer();
   Serial.println();
   Serial.print("storedFirstByte : ");
   Serial.println(storedFirstByte);
@@ -101,9 +100,10 @@ void setup(void)
   Serial.println(storedWifiPass);
   Serial.print("storedUsername : ");
   Serial.println(storedUsername);
-  Serial.print("storedIPAddress : ");
-  Serial.println(storedIPAddress);
-
+  debugMemory();
+  closeClient();
+  closeSoftAP();
+  closeServer();
   if (readFB() == 0)
   {
     initiateSoftAP();
@@ -114,13 +114,21 @@ void setup(void)
     if (!initiateClient(storedSSID, storedWifiPass)) // First try on connecting to stored SSID
     {
       if (!initiateClient(storedSSID, storedWifiPass))
+      {
         initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
-      deployWebServer();
+        deployWebServer();
+        writeFB(0);
+      }
     }
   }
+  debugMemory();
 }
 
-unsigned long loopMillis;
+unsigned long dt;
+unsigned long dtt;
+unsigned long failReq;
+unsigned long successReq;
+unsigned long totalReq;
 void loop(void)
 {
   if (serverAvailable)
@@ -131,6 +139,50 @@ void loop(void)
   {
     if (isWifiConnected())
     {
+      const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(2);
+      DynamicJsonDocument doc(capacity);
+      String json;
+
+      // Type is splitted by 'n'
+      // t means temperature
+      // h means humidity
+      // s means status of aux1,aux2,th,ht,cl (ordered)
+      // the highest order is t and goes lower to s
+      // so tnhns means ESP8266 is sending temperature and humidity
+      doc["type"] = "tnhns";
+
+      JsonArray data = doc.createNestedArray("data");
+      data.add(37.16);
+      data.add(80.2);
+      data.add(1);
+      data.add(0);
+      data.add(1);
+      data.add(1);
+      data.add(0);
+      serializeJson(doc, json);
+
+      int httpCode;
+      String response = fetchURL(FPSTR(requestURL), json, httpCode);
+      if (httpCode > 0)
+      {
+        if (httpCode == HTTP_CODE_OK)
+          successReq++;
+      }
+      else
+      {
+        failReq++;
+      }
+      totalReq++;
+      Serial.printf("%s Response : %s\nT:%lu---F:%lu-S:%lu\n%lums\n", (char *)FPSTR(requestURL), response.c_str(), totalReq, failReq, successReq, dt);
+      if (response == "forget")
+      {
+        writeFB(0);
+        delay(500);
+        ESP.reset();
+      }
+
+      debugMemory();
+      delay(1000);
     }
   }
   // if (!serverClosed)
@@ -180,135 +232,7 @@ void loop(void)
   // }
 }
 
-String fetchURL(String URL, String data, int &responseCode)
-{
-  WiFiClient client;
-  HTTPClient http;
-
-  Serial.print("[HTTP] begin...\n");
-  // configure traged server and url
-  http.begin(client, URL); //HTTP
-  http.addHeader("Content-Type", "application/json");
-
-  Serial.print("[HTTP] POST...\n");
-  // start connection and send HTTP header and body
-  int httpCode = http.POST(data);
-  responseCode = httpCode;
-
-  // httpCode will be negative on error
-  if (httpCode > 0)
-  {
-    // HTTP header has been send and Server response header has been handled
-    Serial.printf("[HTTP] POST... code: %d\n", httpCode);
-
-    // file found at server
-    if (httpCode == HTTP_CODE_OK)
-    {
-      return http.getString();
-    }
-  }
-  else
-  {
-    Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
-  }
-
-  http.end();
-  return "";
-}
-
-uint8_t getrnd()
-{
-  uint8_t really_random = *(volatile uint8_t *)0x3FF20E44;
-  return really_random;
-}
-
-char *multi_tok(char *input, char *delimiter)
-{
-  static char *string;
-  if (input != NULL)
-    string = input;
-
-  if (string == NULL)
-    return string;
-
-  char *end = strstr(string, delimiter);
-  if (end == NULL)
-  {
-    char *temp = string;
-    string = NULL;
-    return temp;
-  }
-
-  char *temp = string;
-
-  *end = '\0';
-  string = end + strlen(delimiter);
-  return temp;
-}
-
-// Generate a random initialization vector
-void gen_iv(byte *iv)
-{
-  for (int i = 0; i < N_BLOCK; i++)
-  {
-    iv[i] = (byte)getrnd();
-  }
-}
-
-// with 632 array allocation, 284 maximum of character is achieved
-String encryptData(String message)
-{
-  char b64dataIV[64];
-  byte cipher[632];
-  char b64dataMessage[632];
-
-  gen_iv(ivByteArray);
-  b64_encode(b64dataIV, (char *)ivByteArray, N_BLOCK); // Encode IV B64
-
-  aes.do_aes_encrypt((byte *)message.c_str(), message.length(), cipher, key, 128, ivByteArray); // Encrypt Message
-
-  b64_encode(b64dataMessage, (char *)cipher, aes.get_size()); // Encode Encrypted Message
-
-  return String(b64dataIV) + "%" + String(b64dataMessage); // Send data
-}
-
-String decryptData(String data)
-{
-  char decodedData[1500];
-  char dataDec[1500];
-  byte out[1500];
-  char ivDec[64];
-  char ivDec64[64];
-
-  char *token = strtok((char *)data.c_str(), "%"); // Explode data
-  byte tokenCounter = 0;
-  while (token != NULL)
-  {
-    if (tokenCounter == 0)
-    {
-      strcpy(ivDec64, token);
-    }
-    else
-    {
-      strcpy(dataDec, token);
-    }
-    token = strtok(NULL, " ");
-    tokenCounter++;
-  }
-
-  b64_decode(ivDec, ivDec64, strlen(ivDec64));
-
-  int decodeLength = b64_decode(decodedData, dataDec, strlen(dataDec));
-
-  Serial.println(decodeLength);
-  aes.do_aes_decrypt((byte *)decodedData, decodeLength, out, key, 128, (byte *)ivDec);
-  int i = 0;
-  while ((out[i] < 128 && out[i] > 31) || out[i] == 194 || out[i] == 182)
-    i++;
-  out[i] = '\0';
-  return String((char *)out);
-}
-
+/////////////////////////////// EEPROM API /////////////////////////////////////////////////////////
 void storeString(int addrOffset, const String &strToWrite)
 {
   byte len = strToWrite.length();
@@ -319,7 +243,7 @@ void storeString(int addrOffset, const String &strToWrite)
   eeprom.writeBytes(addrOffset + 1, len, data);
 }
 
-String readString(int addrOffset)
+const String readString(int addrOffset)
 {
   int newStrLen = eeprom.readByte(addrOffset);
   byte data[newStrLen + 1];
@@ -337,10 +261,11 @@ byte readFB()
 void writeFB(byte data)
 {
   eeprom.writeByte(0, data);
+  storedFirstByte = data;
   delay(10);
 }
 
-String readFromEEPROM(byte what)
+const String readFromEEPROM(byte what)
 {
   if (what == WIFISSID)
   {
@@ -367,16 +292,11 @@ String readFromEEPROM(byte what)
     storedUsername = readString(205);
     return storedUsername;
   }
-  else if (what == IPADDRESS)
-  {
-    storedIPAddress = readString(237);
-    return storedIPAddress;
-  }
 
   return "INVALID";
 }
 
-void writeToEEPROM(byte what, String strToWrite)
+void writeToEEPROM(byte what, const String &strToWrite)
 {
   unsigned int address = 1;
 
@@ -405,23 +325,17 @@ void writeToEEPROM(byte what, String strToWrite)
     storedUsername = strToWrite;
     address = 205;
   }
-  else if (what == IPADDRESS)
-  {
-    storedIPAddress = strToWrite;
-    address = 237;
-  }
   storeString(address, strToWrite);
 }
 
 void loadInfo()
 {
-  storedFirstByte = readFB();
-  storedSSID = readFromEEPROM(WIFISSID);
-  storedWifiPass = readFromEEPROM(WIFIPW);
-  storedSoftSSID = readFromEEPROM(SOFTSSID);
-  storedSoftWifiPass = readFromEEPROM(SOFTPW);
-  storedUsername = readFromEEPROM(USERNAME);
-  storedIPAddress = readFromEEPROM(IPADDRESS);
+  readFB();
+  readFromEEPROM(WIFISSID);
+  readFromEEPROM(WIFIPW);
+  readFromEEPROM(SOFTSSID);
+  readFromEEPROM(SOFTPW);
+  readFromEEPROM(USERNAME);
   if (storedSSID == " ")
     storedSSID = "";
   if (storedWifiPass == " ")
@@ -432,23 +346,41 @@ void loadInfo()
     storedSoftWifiPass = "";
   if (storedUsername == " ")
     storedUsername = "";
-  if (storedIPAddress == " ")
-    storedIPAddress = "192.168.4.1";
 }
 
-void processIPString(String *buffer, String ipdata)
-{
-  char ipCopy[20];
-  ipdata.toCharArray(ipCopy, 20);
-  char *token = strtok(ipCopy, "."); // Explode data
-  byte tokenCounter = 0;
+/////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  while (token != NULL)
+/////////////////////////////// SOFT AP, CLIENT AND WEB SERVER API //////////////////////////////////
+
+const String fetchURL(const String &URL, const String &data, int &responseCode)
+{
+  WiFiClient client;
+  HTTPClient http;
+  // configure traged server and url
+  http.begin(client, URL); //HTTP
+  http.addHeader(F("Content-Type"), F("application/json"));
+
+  // start connection and send HTTP header and body
+  int httpCode = http.POST(data);
+  responseCode = httpCode;
+
+  // httpCode will be negative on error
+  if (httpCode > 0)
   {
-    buffer[tokenCounter] = String(token);
-    token = strtok(NULL, ".");
-    tokenCounter++;
+    // HTTP header has been send and Server response header has been handled
+    // file found at server
+    if (httpCode == HTTP_CODE_OK)
+    {
+      return http.getString();
+    }
   }
+  else
+  {
+    Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+
+  http.end();
+  return "";
 }
 
 bool isWifiConnected()
@@ -500,7 +432,7 @@ bool initiateSoftAP()
   return timeOutFlag;
 }
 
-bool initiateClient(String ssid, String pass)
+bool initiateClient(const String &ssid, const String &pass)
 {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
@@ -557,7 +489,9 @@ void closeServer()
   server.close();
   serverAvailable = false;
 }
+/////////////////////////////////////////////////////////////////////////////////////////////////////
 
+///////////////////////////////// WEB SERVER REQUEST HANDLER ////////////////////////////////////////
 void pgRoot()
 {
   server.send(200, "text/html", FPSTR(htmlDoc));
@@ -565,73 +499,102 @@ void pgRoot()
 
 void pgRestart()
 {
-  delay(100);
+  server.send(200, "text/plain", "restart");
+  delay(500);
   ESP.reset();
 }
 
 String responseStatus = "empty";
 void pgAccInfo()
 {
-  String usrn = server.arg("usrn");
-  String unpw = server.arg("unpw");
-  String ssid = server.arg("ssid");
-  String wfpw = server.arg("wfpw");
+  String usrn = server.arg(F("usrn"));
+  String unpw = server.arg(F("unpw"));
+  String ssid = server.arg(F("ssid"));
+  String wfpw = server.arg(F("wfpw"));
+
+  if (usrn.length() > 32)
+    usrn = "overlength";
+  if (unpw.length() > 64)
+    unpw = "overlength";
+  if (ssid.length() > 32)
+    ssid = "overlength";
+  if (wfpw.length() > 64)
+    wfpw = "overlength";
+
   Serial.printf("Username : %s\nPassword : %s\nSSID : %s\nWiFiPW : %s\n", usrn.c_str(), unpw.c_str(), ssid.c_str(), wfpw.c_str());
   if (initiateClient(ssid, wfpw))
   {
+    // This WiFi seems legit, let's save to EEPROM
+    writeToEEPROM(WIFISSID, ssid);
+    writeToEEPROM(WIFIPW, wfpw);
+
+    // Initiate HTTP Request to identifyDevice.php
     Serial.print("[HTTP] begin...\n");
     int httpCode;
-    const size_t capacity = JSON_OBJECT_SIZE(5);
-    DynamicJsonDocument doc(capacity);
-    String json = "";
-    doc["username"] = usrn.c_str();
-    doc["password"] = unpw.c_str();
-    doc["devicetoken"] = String(DEVICETOKEN).c_str();
-    doc["softssid"] = storedSoftSSID.c_str();
-    doc["softpw"] = storedSoftWifiPass.c_str();
+    StaticJsonDocument<350> doc;
+    String json;
+    doc[F("username")] = usrn.c_str();
+    doc[F("password")] = unpw.c_str();
+    doc[F("devicetoken")] = DEVICETOKEN;
+    doc[F("softssid")] = storedSoftSSID.c_str();
+    doc[F("softpw")] = storedSoftWifiPass.c_str();
     serializeJson(doc, json);
-    responseStatus = fetchURL("http://192.168.2.110:8080/otoma/teste.php", json, httpCode);
+    Serial.printf("JSON Size : %d\n", doc.memoryUsage());
+    Serial.printf("Transferred JSON : %s\n", json.c_str());
+    responseStatus = fetchURL(FPSTR(identifyURL), json, httpCode);
+    Serial.printf("Code : %d\nResponse : %s\n", httpCode, responseStatus.c_str());
     if (httpCode == HTTP_CODE_OK)
-    {
-      if (responseStatus == "success")
+    { // Success fetched!, store the message to responseStatus!
+      if (responseStatus == "success" || responseStatus == "recon")
       {
         writeToEEPROM(USERNAME, usrn);
         writeFB(1);
       }
     }
     else
-      responseStatus = "nocon";
+    { // It seems that first request is failed, let's wait for 1s and try again for the second time
+      delay(1000);
+      responseStatus = fetchURL(FPSTR(identifyURL), json, httpCode);
+      if (httpCode == HTTP_CODE_OK)
+      { // Success fetched!, store the message to responseStatus!
+        if (responseStatus == "success" || responseStatus == "recon")
+        {
+          writeToEEPROM(USERNAME, usrn);
+          writeFB(1);
+        }
+      }
+      else // It failed once again, probably the WiFi is offline or server is offline, let's report
+        responseStatus = "nocon";
+    }
   }
-  else
-  {
+  else // Cannot connect to WiFi, report invalid SSID or Password!
     responseStatus = "invwifi";
-  }
+  // Reinitiate softAP and re deploy the web server to 192.168.4.1
   closeClient();
   closeServer();
   closeSoftAP();
   initiateSoftAP();
   deployWebServer();
+  debugMemory();
 }
 
 void pgReqStatus()
 {
-  const size_t capacity = JSON_OBJECT_SIZE(4);
-  DynamicJsonDocument doc(capacity);
-  String json = "";
-  doc["usrn"] = storedUsername.c_str();
-  doc["ssid"] = storedSSID.c_str();
-  doc["wfpw"] = storedWifiPass.c_str();
-  doc["message"] = responseStatus.c_str();
-  Serial.println(storedUsername);
-  Serial.println(storedSSID);
-  Serial.println(storedWifiPass);
-  Serial.println(responseStatus);
+  StaticJsonDocument<240> doc;
+  String json;
+  doc[F("usrn")] = storedUsername.c_str();
+  doc[F("ssid")] = storedSSID.c_str();
+  doc[F("wfpw")] = storedWifiPass.c_str();
+  doc[F("message")] = responseStatus.c_str();
   serializeJson(doc, json);
+  Serial.printf("JSON Size : %d\n", doc.memoryUsage());
   Serial.printf("Transferring JSON : %s\n", json.c_str());
   server.send(200, "application/json", json);
+  debugMemory();
 }
 
 void handleNotFound()
 {
-  server.send(404, "text/plain", "404: Not found");
+  server.send(404, "text/plain", F("404: Not found"));
 }
+/////////////////////////////////////////////////////////////////////////////////////////////////////
