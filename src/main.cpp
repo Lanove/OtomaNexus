@@ -9,6 +9,8 @@ Todo :
 - Create Analog Input API
 - Remove != and == from comparator list
 - Lol, the name is operator, not comparator. to be exact, it was relational operators
+- Lk sempet add OTA Web Server HTTP Update
+- Fix parse input on web automation program
 
 Idea : 
 - do something like this on automation program
@@ -49,7 +51,6 @@ Ngubah keadaan output pas akhir program, kinda like ladder logic
 #include <ArduinoJson.h>
 
 #define EEPROM_ADDRESS 0x50
-#define DEVICETOKEN "te9Dz1MfFK"
 #define FB 0
 #define WIFISSID 1
 #define WIFIPW 2
@@ -58,6 +59,8 @@ Ngubah keadaan output pas akhir program, kinda like ladder logic
 #define USERNAME 5
 #define IPADDRESS 6
 #define GATEWAY 7
+#define DEVICETOKEN 8
+#define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
 
 static Eeprom24C04_16 eeprom(EEPROM_ADDRESS);
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
@@ -70,9 +73,12 @@ String storedSSID;
 String storedWifiPass;
 String storedSoftSSID;
 String storedSoftWifiPass;
+String storedDeviceToken;
 byte storedFirstByte;
 bool serverAvailable;
 bool triedLog = false;
+unsigned long disconnectStamp;
+bool disconnectFlag;
 
 void debugMemory(); // Function to check free stack and heap remaining
 void storeString(int addrOffset, const String &strToWrite);
@@ -152,18 +158,19 @@ void setup(void)
   }
   else
   {
-    // The WiFi connection take 90 seconds maximum
-    if (!initiateClient(storedSSID, storedWifiPass)) // First try on connecting to stored SSID
+    int timeOutCounter = 0;
+    while (timeOutCounter < 5) // Try for maximum of 5 attempts
     {
-      if (!initiateClient(storedSSID, storedWifiPass))
-      {
-        if (!initiateClient(storedSSID, storedWifiPass))
-        {
-          initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
-          deployWebServer();
-          writeFB(0);
-        }
-      }
+      if (initiateClient(storedSSID, storedWifiPass))
+        break;
+      timeOutCounter++;
+    }
+    if (timeOutCounter >= 5) // If timed out for 5 attemps, rollback to softAP mode and reset FB
+    {
+      Serial.println("Fail reconnect WiFi");
+      initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
+      deployWebServer();
+      writeFB(0);
     }
   }
   if (isWifiConnected())
@@ -177,7 +184,6 @@ void setup(void)
     {
       if (!rtc.isrunning())
       {
-
         Serial.println("Could'nt Initiate RTC!");
         // We're fucked up my friend, RTC is not running and can't fetch NTP time, so we'll stop right there too
         // failed to init rtc
@@ -234,62 +240,51 @@ void loop(void)
       int httpCode;
       String response = fetchURL(FPSTR(requestURL), json, httpCode);
       Serial.printf("Response : %s\n", response.c_str());
-      if (response == "forget")
+      if (httpCode > 0)
       {
-        writeFB(0);
-        delay(500);
-        ESP.reset();
+        if (httpCode == HTTP_CODE_OK || httpCode >= 500 || (httpCode > 200 && httpCode < 300)) // Successful Fetch or Server Mistake reset disconnectFlag
+        {
+          disconnectFlag = false;
+          disconnectStamp = millis();
+        }
+        else if (httpCode >= 400 && httpCode < 500)
+        {
+          disconnectFlag = true;
+          disconnectStamp = millis();
+        }
+        if (httpCode == HTTP_CODE_OK)
+        {
+          if (response == "forget")
+          {
+            writeFB(0);
+            delay(500);
+            ESP.reset();
+          }
+        }
+      }
+      else
+      {
+        disconnectFlag = true;
+        disconnectStamp = millis();
       }
 
       debugMemory();
       delay(1000);
     }
+    else
+    {
+      disconnectFlag = true;
+      disconnectStamp = millis();
+    }
   }
-  // if (!serverClosed)
-  // if (storedFirstByte == 1 && millis() - loopMillis >= 1000)
-  // {
-  //   loopMillis = millis();
-  //   if ((WiFi.status() == WL_CONNECTED))
-  //   {
-
-  //     Serial.print("[HTTP] begin...\n");
-
-  //     WiFiClient client;
-  //     http.begin(client, "http://192.168.7.65:8080/db_getLastStatus.php?token=keSvw4Hwt6");
-
-  //     Serial.print("[HTTP] GET...\n");
-  //     // start connection and send HTTP header
-  //     int httpCode = http.GET();
-
-  //     // httpCode will be negative on error
-  //     if (httpCode > 0)
-  //     {
-  //       // HTTP header has been send and Server response header has been handled
-  //       Serial.printf("[HTTP] GET... code: %d\n", httpCode);
-
-  //       // file found at server
-  //       if (httpCode == HTTP_CODE_OK)
-  //       {
-  //         String payload = http.getString();
-  //         Serial.println(payload);
-  //         if (payload == "OFF")
-  //           digitalWrite(LED_BUILTIN, HIGH);
-  //         else if (payload == "ON")
-  //           digitalWrite(LED_BUILTIN, LOW);
-  //       }
-  //     }
-  //     else
-  //     {
-  //       Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
-  //     }
-
-  //     http.end();
-  //   }
-  //   else
-  //   {
-  //     Serial.println("DISCONNECTED");
-  //   }
-  // }
+  if (disconnectFlag && millis() - disconnectStamp >= MAXIMUM_DISCONNECT_TIME)
+  {
+    writeToEEPROM(WIFISSID, "GAGAL KONEKSI");
+    writeToEEPROM(WIFIPW, " ");
+    writeFB(0);
+    delay(500);
+    ESP.reset();
+  }
 }
 
 /////////////////////////////// EEPROM API /////////////////////////////////////////////////////////
@@ -334,23 +329,28 @@ const String readFromEEPROM(byte what)
   }
   else if (what == WIFIPW)
   {
-    storedWifiPass = readString(33);
+    storedWifiPass = readString(34);
     return storedWifiPass;
   }
   else if (what == SOFTSSID)
   {
-    storedSoftSSID = readString(108);
+    storedSoftSSID = readString(99);
     return storedSoftSSID;
   }
   else if (what == SOFTPW)
   {
-    storedSoftWifiPass = readString(140);
+    storedSoftWifiPass = readString(132);
     return storedSoftWifiPass;
   }
   else if (what == USERNAME)
   {
-    storedUsername = readString(205);
+    storedUsername = readString(197);
     return storedUsername;
+  }
+  else if (what == DEVICETOKEN)
+  {
+    storedDeviceToken = readString(230);
+    return storedDeviceToken;
   }
 
   return "INVALID";
@@ -362,28 +362,39 @@ void writeToEEPROM(byte what, const String &strToWrite)
 
   if (what == WIFISSID)
   {
-    storedSSID = strToWrite;
+    if (strToWrite.length() < 33)
+      storedSSID = strToWrite;
     address = 1;
   }
   else if (what == WIFIPW)
   {
-    storedWifiPass = strToWrite;
-    address = 33;
+    if (strToWrite.length() < 65)
+      storedWifiPass = strToWrite;
+    address = 34;
   }
   else if (what == SOFTSSID)
   {
-    storedSoftSSID = strToWrite;
-    address = 108;
+    if (strToWrite.length() < 33)
+      storedSoftSSID = strToWrite;
+    address = 99;
   }
   else if (what == SOFTPW)
   {
-    storedSoftWifiPass = strToWrite;
-    address = 140;
+    if (strToWrite.length() < 65)
+      storedSoftWifiPass = strToWrite;
+    address = 132;
   }
   else if (what == USERNAME)
   {
-    storedUsername = strToWrite;
-    address = 205;
+    if (strToWrite.length() < 33)
+      storedUsername = strToWrite;
+    address = 197;
+  }
+  else if (what == DEVICETOKEN)
+  {
+    if (strToWrite.length() < 11)
+      storedDeviceToken = strToWrite;
+    address = 230;
   }
   storeString(address, strToWrite);
 }
@@ -396,6 +407,7 @@ void loadInfo()
   readFromEEPROM(SOFTSSID);
   readFromEEPROM(SOFTPW);
   readFromEEPROM(USERNAME);
+  readFromEEPROM(DEVICETOKEN);
   if (storedSSID == " ")
     storedSSID = "";
   if (storedWifiPass == " ")
@@ -406,6 +418,8 @@ void loadInfo()
     storedSoftWifiPass = "";
   if (storedUsername == " ")
     storedUsername = "";
+  if (storedDeviceToken == " ")
+    storedDeviceToken = "";
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -485,9 +499,6 @@ bool initiateSoftAP()
       delay(500);
     }
   }
-  IPAddress myIP = WiFi.softAPIP();
-  Serial.print("AP IP address: ");
-  Serial.println(myIP);
   delay(100);
   return timeOutFlag;
 }
@@ -511,7 +522,7 @@ bool initiateClient(const String &ssid, const String &pass)
       Serial.print(".");
       delay(500);
     }
-    if (i == 19)
+    if (i >= 29)
     {
       successFlag = 0;
     }
@@ -595,7 +606,7 @@ void pgAccInfo()
     String json;
     doc[F("username")] = usrn.c_str();
     doc[F("password")] = unpw.c_str();
-    doc[F("devicetoken")] = DEVICETOKEN;
+    doc[F("devicetoken")] = storedDeviceToken.c_str();
     doc[F("softssid")] = storedSoftSSID.c_str();
     doc[F("softpw")] = storedSoftWifiPass.c_str();
     serializeJson(doc, json);
