@@ -5,8 +5,8 @@ Todo :
 - Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
 - Add buzzer notification for WiFi fail connect, disconnect, time out.
 - Add LED status for WiFi connecting, and setup status
-- Create Shift Register API
-- Create Analog Input API
+- Create Shift Register API -- done part
+- Create Analog Input API -- done part
 - Remove != and == from comparator list
 - Lol, the name is operator, not comparator. to be exact, it was relational operators
 - Lk sempet add OTA Web Server HTTP Update
@@ -35,6 +35,15 @@ tsumari, dia punya anti-aksi lk wes ga memenuhi kondisi, tapi hanya one-shot saj
 
 Ngubah keadaan output pas akhir program, kinda like ladder logic
 
+Keterangan Pin :
+- GPIO16 - ENC CLK/A
+- GPIO14 - ENC DT/B
+- GPIO12 - ENC BTN
+- GPIO13 - SENSE
+- GPIO0 - 595 CLK
+- GPIO2 - 595 LATCH
+- GPIO15 - 595 DATA
+
 */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -45,12 +54,17 @@ Ngubah keadaan output pas akhir program, kinda like ladder logic
 #include <WiFiUdp.h>
 #include <html.h>
 
+#include <ArduinoJson.h>
 #include <Wire.h>
 #include <RTClib.h>
 #include <Eeprom24C04_16.h>
-#include <ArduinoJson.h>
+#include "DHT.h"
+#include <ShiftRegister74HC595.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 #define EEPROM_ADDRESS 0x50
+
 #define FB 0
 #define WIFISSID 1
 #define WIFIPW 2
@@ -60,6 +74,29 @@ Ngubah keadaan output pas akhir program, kinda like ladder logic
 #define IPADDRESS 6
 #define GATEWAY 7
 #define DEVICETOKEN 8
+
+#define FB_CONNECTED 0
+#define FB_WIFI_ERROR1 1
+#define FB_WIFI_ERROR2 2
+
+#define DHTPIN 13
+#define DHTTYPE DHT11
+
+#define DATA595 15
+#define LATCH595 2
+#define CLOCK595 0
+
+// QA to QH of 595, in sort
+#define LED_STATUS 0
+#define AUX2_RELAY 1
+#define AUX1_RELAY 2
+#define HEATER_RELAY 3
+#define COOLER_RELAY 4
+#define MUX_A 5
+#define MUX_B 6
+#define BUZZER 7
+
+#define ONE_WIRE_BUS 13
 #define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
 
 static Eeprom24C04_16 eeprom(EEPROM_ADDRESS);
@@ -67,6 +104,10 @@ ESP8266WebServer server(80); // Create a webserver object that listens for HTTP 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200); // 25200 for UTC+7, 3600*(UTC)
 RTC_DS1307 rtc;
+DHT dht(DHTPIN, DHTTYPE);
+ShiftRegister74HC595<1> sr(DATA595, CLOCK595, LATCH595);
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature ds18b(&oneWire);
 
 String storedUsername;
 String storedSSID;
@@ -79,14 +120,18 @@ bool serverAvailable;
 bool triedLog = false;
 unsigned long disconnectStamp;
 bool disconnectFlag;
+byte byte595Status;
+bool bit595Status;
 
 void debugMemory(); // Function to check free stack and heap remaining
 void storeString(int addrOffset, const String &strToWrite);
 const String readString(int addrOffset);
 const String readFromEEPROM(byte what);
 void writeToEEPROM(byte what, const String &strToWrite);
-byte readFB();
-void writeFB(byte data);
+byte byteReadFB();
+void byteWriteFB(byte data);
+bool bitReadFB(byte docchi);
+void bitWriteFB(byte docchi, bool status);
 void loadInfo();
 bool initiateSoftAP();
 bool initiateClient(const String &ssid, const String &pass);
@@ -103,6 +148,13 @@ void pgRestart();
 void pgReqStatus();
 void pgAccInfo();
 void handleNotFound();
+void toggle595Bit(byte docchi);
+void bitWrite595(byte docchi, bool status);
+byte byteRead595();
+bool bitRead595(byte docchi);
+void byteWrite595(const uint8_t data);
+void selectMux(byte channel);
+int readMux();
 
 void debugMemory()
 {
@@ -116,12 +168,17 @@ void setup(void)
   storedWifiPass.reserve(64);
   storedSoftSSID.reserve(32);
   storedSoftWifiPass.reserve(64);
+  storedDeviceToken.reserve(10);
   Serial.begin(74880); // Start the Serial communication to send messages to the computer
+
+  Serial.println("START!");
   delay(10);
   Serial.println('\n');
+  Serial.println("IM HERE!");
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
   debugMemory();
+
   if (!rtc.begin())
   {
     Serial.println("Couldn't Start RTC!");
@@ -133,6 +190,10 @@ void setup(void)
     }
   }
   eeprom.initialize();
+  ds18b.begin();
+  dht.begin();
+
+  Serial.println("IM HERE!!!");
   loadInfo();
   Serial.println();
   Serial.print("storedFirstByte : ");
@@ -148,10 +209,12 @@ void setup(void)
   Serial.print("storedUsername : ");
   Serial.println(storedUsername);
   debugMemory();
+
+  byteWrite595(0x00);
   closeClient();
   closeSoftAP();
   closeServer();
-  if (readFB() == 0)
+  if (!bitReadFB(FB_CONNECTED))
   {
     initiateSoftAP();
     deployWebServer(); // Deploy web server
@@ -162,15 +225,41 @@ void setup(void)
     while (timeOutCounter < 5) // Try for maximum of 5 attempts
     {
       if (initiateClient(storedSSID, storedWifiPass))
+      {
+        bitWriteFB(FB_WIFI_ERROR1, false);
+        bitWriteFB(FB_WIFI_ERROR2, false);
         break;
+      }
       timeOutCounter++;
     }
-    if (timeOutCounter >= 5) // If timed out for 5 attemps, rollback to softAP mode and reset FB
+    if (timeOutCounter >= 5) // If timed out for 5 attempts after 2 reboot, rollback to softAP mode and reset FB
     {
       Serial.println("Fail reconnect WiFi");
-      initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
-      deployWebServer();
-      writeFB(0);
+      if (bitReadFB(!FB_WIFI_ERROR1))
+      {
+        Serial.println("Rebooting attempt 1");
+        bitWriteFB(FB_WIFI_ERROR1, true);
+        delay(500);
+        ESP.restart();
+      }
+      else
+      {
+        if (bitReadFB(!FB_WIFI_ERROR2))
+        {
+          Serial.println("Rebooting attempt 2");
+          bitWriteFB(FB_WIFI_ERROR2, true);
+          delay(500);
+          ESP.restart();
+        }
+        else
+        {
+          initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
+          deployWebServer();
+          bitWriteFB(FB_CONNECTED, false);
+          bitWriteFB(FB_WIFI_ERROR1, false);
+          bitWriteFB(FB_WIFI_ERROR2, false);
+        }
+      }
     }
   }
   if (isWifiConnected())
@@ -256,7 +345,7 @@ void loop(void)
         {
           if (response == "forget")
           {
-            writeFB(0);
+            bitWriteFB(FB_CONNECTED, false);
             delay(500);
             ESP.reset();
           }
@@ -281,11 +370,69 @@ void loop(void)
   {
     writeToEEPROM(WIFISSID, "GAGAL KONEKSI");
     writeToEEPROM(WIFIPW, " ");
-    writeFB(0);
+    bitWriteFB(FB_CONNECTED, false);
     delay(500);
     ESP.reset();
   }
 }
+
+////////////////////////////////////// IO API ///////////////////////////////////////////////////////
+void toggle595Bit(byte docchi)
+{
+  byte595Status ^= 1 << docchi;
+  sr.set(docchi, bitRead595(docchi));
+}
+
+void bitWrite595(byte docchi, bool status)
+{
+  sr.set(docchi, status);
+  if (status)
+    byte595Status |= (1 << docchi);
+  else
+    byte595Status &= ~(1 << docchi);
+}
+
+byte byteRead595()
+{
+  return byte595Status;
+}
+
+bool bitRead595(byte docchi)
+{
+  return ((byte595Status >> docchi) & 0x01);
+}
+
+void byteWrite595(const uint8_t data)
+{
+  const uint8_t dataCopy[1] = {data};
+  sr.setAll(dataCopy);
+  memcpy((uint8_t *)&byte595Status, &data, 1 * sizeof(uint8_t));
+}
+
+void selectMux(byte channel)
+{
+  if (channel == 1)
+  { // A1 is X0
+    bitWrite595(MUX_A, LOW);
+    bitWrite595(MUX_B, LOW);
+  }
+  else if (channel == 2)
+  { // A2 is X1
+    bitWrite595(MUX_A, HIGH);
+    bitWrite595(MUX_B, LOW);
+  }
+  else if (channel == 3)
+  { // A3 is X2
+    bitWrite595(MUX_A, LOW);
+    bitWrite595(MUX_B, HIGH);
+  }
+  else if (channel == 0)
+  { // A0 is X3
+    bitWrite595(MUX_A, HIGH);
+    bitWrite595(MUX_B, HIGH);
+  }
+}
+/////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /////////////////////////////// EEPROM API /////////////////////////////////////////////////////////
 void storeString(int addrOffset, const String &strToWrite)
@@ -307,17 +454,31 @@ const String readString(int addrOffset)
   return String((char *)data);
 }
 
-byte readFB()
+byte byteReadFB()
 {
   storedFirstByte = eeprom.readByte(0);
   return storedFirstByte;
 }
 
-void writeFB(byte data)
+void byteWriteFB(byte data)
 {
   eeprom.writeByte(0, data);
   storedFirstByte = data;
   delay(10);
+}
+
+bool bitReadFB(byte docchi)
+{
+  return ((storedFirstByte >> docchi) & 0x01);
+}
+
+void bitWriteFB(byte docchi, bool status)
+{
+  if (status)
+    storedFirstByte |= (1 << docchi);
+  else
+    storedFirstByte &= ~(1 << docchi);
+  byteWriteFB(storedFirstByte);
 }
 
 const String readFromEEPROM(byte what)
@@ -401,7 +562,7 @@ void writeToEEPROM(byte what, const String &strToWrite)
 
 void loadInfo()
 {
-  readFB();
+  byteReadFB();
   readFromEEPROM(WIFISSID);
   readFromEEPROM(WIFIPW);
   readFromEEPROM(SOFTSSID);
@@ -421,11 +582,9 @@ void loadInfo()
   if (storedDeviceToken == " ")
     storedDeviceToken = "";
 }
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /////////////////////////////// SOFT AP, CLIENT AND WEB SERVER API //////////////////////////////////
-
 const String fetchURL(const String &URL, const String &data, int &responseCode)
 {
   WiFiClient client;
@@ -520,7 +679,10 @@ bool initiateClient(const String &ssid, const String &pass)
     else
     {
       Serial.print(".");
-      delay(500);
+      bitWrite595(LED_STATUS, HIGH);
+      delay(250);
+      bitWrite595(LED_STATUS, LOW);
+      delay(250);
     }
     if (i >= 29)
     {
@@ -619,7 +781,7 @@ void pgAccInfo()
       if (responseStatus == "success" || responseStatus == "recon")
       {
         writeToEEPROM(USERNAME, usrn);
-        writeFB(1);
+        bitWriteFB(FB_CONNECTED, true);
       }
     }
     else
@@ -631,7 +793,7 @@ void pgAccInfo()
         if (responseStatus == "success" || responseStatus == "recon")
         {
           writeToEEPROM(USERNAME, usrn);
-          writeFB(1);
+          bitWriteFB(FB_CONNECTED, true);
         }
       }
       else // It failed once again, probably the WiFi is offline or server is offline, let's report
