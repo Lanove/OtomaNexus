@@ -11,6 +11,7 @@ Todo :
 - Lol, the name is operator, not comparator. to be exact, it was relational operators
 - Lk sempet add OTA Web Server HTTP Update
 - Fix parse input on web automation program
+- Optimize stack usage by moving memory usage to heap with malloc/free/calloc
 
 Idea : 
 - do something like this on automation program
@@ -47,11 +48,12 @@ Keterangan Pin :
 */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <time.h>
 #include <html.h>
 
 #include <ArduinoJson.h>
@@ -99,10 +101,11 @@ Keterangan Pin :
 #define ONE_WIRE_BUS 13
 #define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
 
-static Eeprom24C04_16 eeprom(EEPROM_ADDRESS);
+WiFiClientSecure client;
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200); // 25200 for UTC+7, 3600*(UTC)
+static Eeprom24C04_16 eeprom(EEPROM_ADDRESS);
 RTC_DS1307 rtc;
 DHT dht(DHTPIN, DHTTYPE);
 ShiftRegister74HC595<1> sr(DATA595, CLOCK595, LATCH595);
@@ -122,6 +125,28 @@ unsigned long disconnectStamp;
 bool disconnectFlag;
 byte byte595Status;
 bool bit595Status;
+byte deviceStatus;
+int thermalSetPoint;
+float heaterKp;
+float heaterKi;
+float heaterKd;
+float heaterDs;
+
+float heaterBa;
+float heaterBb;
+
+float coolerKp;
+float coolerKi;
+float coolerKd;
+float coolerDs;
+
+float coolerBa;
+float coolerBb;
+
+byte progTrig[30];
+byte progRB1[30][4];
+byte progRB2[30][4];
+byte progAct[30];
 
 void debugMemory(); // Function to check free stack and heap remaining
 void storeString(int addrOffset, const String &strToWrite);
@@ -132,6 +157,7 @@ byte byteReadFB();
 void byteWriteFB(byte data);
 bool bitReadFB(byte docchi);
 void bitWriteFB(byte docchi, bool status);
+
 void loadInfo();
 bool initiateSoftAP();
 bool initiateClient(const String &ssid, const String &pass);
@@ -192,7 +218,7 @@ void setup(void)
   eeprom.initialize();
   ds18b.begin();
   dht.begin();
-
+  bitWriteFB(FB_CONNECTED, true);
   Serial.println("IM HERE!!!");
   loadInfo();
   Serial.println();
@@ -208,6 +234,17 @@ void setup(void)
   Serial.println(storedWifiPass);
   Serial.print("storedUsername : ");
   Serial.println(storedUsername);
+  if (!client.setCACert_P(caCert, caCertLen))
+  {
+    Serial.println("Failed to load root CA certificate!");
+    while (true)
+    {
+      delay(500);
+      ESP.restart();
+    }
+  }
+  else
+    Serial.println("CA Certificate Loaded!");
   debugMemory();
 
   byteWrite595(0x00);
@@ -268,9 +305,12 @@ void setup(void)
     if (timeClient.forceUpdate())
     {
       rtc.adjust(DateTime(timeClient.getEpochTime()));
+      client.setX509Time(timeClient.getEpochTime());
+      Serial.println("NTP Clock Acquired");
     }
     else
     {
+      Serial.println("Failed fetching NTP Clock");
       if (!rtc.isrunning())
       {
         Serial.println("Could'nt Initiate RTC!");
@@ -280,9 +320,17 @@ void setup(void)
         // rtc is important element, so stop right here if something is wrong
         while (true)
         {
+          // do something here
         }
       }
+      else
+      {
+        client.setX509Time(rtc.now().unixtime());
+        Serial.printf("Initializing client x509 time RTC : %lu", rtc.now().unixtime());
+      }
     }
+
+    debugMemory();
   }
   debugMemory();
 }
@@ -307,7 +355,6 @@ void loop(void)
       const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(3);
       DynamicJsonDocument doc(capacity);
       String json;
-      Serial.printf("%d/%d/%d %d:%d:%d\n", now.day(), now.month(), now.year(), now.hour(), now.minute(), now.second());
       // Type is splitted by 'n'
       // t means temperature
       // h means humidity
@@ -358,7 +405,7 @@ void loop(void)
       }
 
       debugMemory();
-      delay(1000);
+      delay(10000);
     }
     else
     {
@@ -557,6 +604,7 @@ void writeToEEPROM(byte what, const String &strToWrite)
       storedDeviceToken = strToWrite;
     address = 230;
   }
+
   storeString(address, strToWrite);
 }
 
@@ -587,7 +635,26 @@ void loadInfo()
 /////////////////////////////// SOFT AP, CLIENT AND WEB SERVER API //////////////////////////////////
 const String fetchURL(const String &URL, const String &data, int &responseCode)
 {
-  WiFiClient client;
+  debugMemory();
+  if (!client.connect("dev.otoma.my.id", 443))
+  {
+    Serial.println("connection failed");
+    responseCode = 408;
+    return "";
+  }
+
+  // Verify validity of server's certificate
+  if (client.verifyCertChain("dev.otoma.my.id"))
+  {
+    Serial.println("Server certificate verified");
+  }
+  else
+  {
+    Serial.println("ERROR: certificate verification failed!");
+    //   return;
+  }
+
+  debugMemory();
   HTTPClient http;
   // configure traged server and url
   http.begin(client, URL); //HTTP
