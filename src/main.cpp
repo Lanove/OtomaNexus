@@ -122,7 +122,7 @@ byte progAct[30];
 
 void debugMemory(); // Function to check free stack and heap remaining
 void storeString(int addrOffset, const String &strToWrite);
-const String readString(int addrOffset);
+byte *readString(int addrOffset);
 const String readFromEEPROM(byte what);
 void writeToEEPROM(byte what, const String &strToWrite);
 byte byteReadFB();
@@ -162,6 +162,8 @@ void debugMemory()
 
 void setup(void)
 {
+  Serial.println("Init");
+  debugMemory();
   storedUsername.reserve(32);
   storedSSID.reserve(32);
   storedWifiPass.reserve(64);
@@ -173,8 +175,9 @@ void setup(void)
   delay(10);
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
-  debugMemory();
 
+  Serial.println("PreLib");
+  debugMemory();
   if (!rtc.begin())
   {
     Serial.println("Couldn't Start RTC!");
@@ -188,51 +191,18 @@ void setup(void)
   eeprom.initialize();
   ds18b.begin();
   dht.begin();
+  Serial.println("AftLib");
+  debugMemory();
 
+  Serial.println("PreLdInfo");
+  debugMemory();
   loadInfo();
-  eeprom.writeByte(ADDR_DEVICE_STATUS, 123);
-  delay(10);
-  eeprom.writeByte(ADDR_THERMAL_SETPOINT, 0x2B);
-  delay(10);
-  eeprom.writeByte(ADDR_THERMAL_SETPOINT + 1, 0x2);
-  delay(10);
-  byte lo[4] = {0x7B, 0x14, 0x0E, 0x40};
-  byte li[4] = {0x33, 0x33, 0xF6, 0x42};
-  byte le[4] = {0x9A, 0x99, 0x09, 0x40};
-  byte lu[4] = {0xCD, 0xCC, 0x84, 0x40};
-  eeprom.writeBytes(ADDR_HEATER_KP, 4, lo);
-  eeprom.writeBytes(ADDR_HEATER_KI, 4, lo);
-  eeprom.writeBytes(ADDR_HEATER_KD, 4, lo);
-  eeprom.writeBytes(ADDR_HEATER_DS, 4, li);
-  eeprom.writeBytes(ADDR_HEATER_BA, 4, le);
-  eeprom.writeBytes(ADDR_HEATER_BB, 4, lu);
-
-  eeprom.writeBytes(ADDR_COOLER_KP, 4, lo);
-  eeprom.writeBytes(ADDR_COOLER_KI, 4, lo);
-  eeprom.writeBytes(ADDR_COOLER_KD, 4, lo);
-  eeprom.writeBytes(ADDR_COOLER_DS, 4, li);
-  eeprom.writeBytes(ADDR_COOLER_BA, 4, le);
-  eeprom.writeBytes(ADDR_COOLER_BB, 4, lu);
-  for (uint8_t i = 0; i < 30; i++)
-  {
-    eeprom.writeByte(ADDR_PROG_TRIGGER(i), i);
-    delay(10);
-    eeprom.writeByte(ADDR_PROG_ACTION(i), i);
-    delay(10);
-    byte ko[4] = {i, i + 2, i + 4, i + 8};
-    byte ki[4] = {i + 8, i + 4, i + 2, i};
-    eeprom.writeBytes(ADDR_PROG_RB1(i), 4, ko);
-    eeprom.writeBytes(ADDR_PROG_RB2(i), 4, ki);
-  }
+  Serial.println("AftLdInfo");
   debugMemory();
   loadAllPrograms();
+  Serial.println("AftLdPr");
   debugMemory();
-  Serial.printf("Thermal Setpoint : %d\nHeater Kp: %f\nHeater Ki: %f\nHeater Kd: %f\nHeater Ds: %f\nHeater Ba: %f\nHeater Bb: %f\nCooler Kp: %f\nCooler Ki: %f\nCooler Kd: %f\nCooler Ds: %f\nCooler Ba: %f\nCooler Bb: %f\n", thermalSetPoint, heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb, coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
-  for (uint8_t i = 0; i < 30; i++)
-  {
-    Serial.printf("Trigger Byte : 0x%X\nRB1 Bytes : 0x%X:0x%X:0x%X:0x%X\nRB2 Bytes : 0x%X:0x%X:0x%X:0x%X\nAction Byte : 0x%X\n", progTrig[i], progRB1[i][0], progRB1[i][1], progRB1[i][2], progRB1[i][3], progRB2[i][0], progRB2[i][1], progRB2[i][2], progRB2[i][3], progAct[i]);
-  }
-  delay(10000000);
+
   Serial.println();
   Serial.print("storedFirstByte : ");
   Serial.println(storedFirstByte);
@@ -326,6 +296,10 @@ void setup(void)
 
     debugMemory();
   }
+
+  ds18b.requestTemperatures(); // Send the command to get temperatures
+  newTemp = ds18b.getTempCByIndex(0);
+  newHumid = dht.readHumidity();
   debugMemory();
 }
 
@@ -333,15 +307,21 @@ void loop(void)
 {
   if (millis() - sensorMillis >= SENSOR_DELAY)
   {
-    dhtSampleCounter++;
+    float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
+    dhtSampleCounter--;
     ds18b.requestTemperatures(); // Send the command to get temperatures
-    newTemp = ds18b.getTempCByIndex(0);
-    if (dhtSampleCounter >= DHT_LOOP)
+    sensorBuffer[0] = ds18b.getTempCByIndex(0);
+    if (sensorBuffer[0] != DEVICE_DISCONNECTED_C)
+      newTemp = sensorBuffer[0];
+    if (dhtSampleCounter <= 0 || dhtSampleCounter > DHT_LOOP)
     {
-      newHumid = dht.readHumidity();
-      dhtSampleCounter = 0;
+      sensorBuffer[1] = dht.readHumidity();
+      if (!isnan(sensorBuffer[1]))
+        newHumid = sensorBuffer[1];
+      dhtSampleCounter = DHT_LOOP;
     }
     sensorMillis = millis();
+    free(sensorBuffer);
   }
 
   if (serverAvailable)
@@ -361,7 +341,7 @@ void loop(void)
           if (timeClient.getEpochTime() > now.unixtime() + 10 || timeClient.getEpochTime() < now.unixtime() - 10)
             rtc.adjust(DateTime(timeClient.getEpochTime()));
         }
-        const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(3);
+        const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(4);
         DynamicJsonDocument doc(capacity);
         String json;
         // Type is splitted by 'n'
@@ -501,15 +481,17 @@ void storeString(int addrOffset, const String &strToWrite)
   eeprom.writeByte(addrOffset, len);
   delay(10);
   eeprom.writeBytes(addrOffset + 1, len, data);
+  free(data);
 }
 
-const String readString(int addrOffset)
+byte *readString(int addrOffset)
 {
+  byte *buffer;
   int newStrLen = eeprom.readByte(addrOffset);
-  byte *data = (byte *)malloc(sizeof(byte) * (newStrLen + 1));
-  eeprom.readBytes(addrOffset + 1, newStrLen, data);
-  data[newStrLen] = '\0';
-  return String((char *)data);
+  buffer = (byte *)malloc(sizeof(byte) * newStrLen);
+  eeprom.readBytes(addrOffset + 1, newStrLen, buffer);
+  buffer[newStrLen] = '\0';
+  return buffer;
 }
 
 byte byteReadFB()
@@ -541,37 +523,50 @@ void bitWriteFB(byte docchi, bool status)
 
 const String readFromEEPROM(byte what)
 {
+  byte *data;
   if (what == WIFISSID)
   {
-    storedSSID = readString(1);
+    data = readString(1);
+    storedSSID = String((char *)data);
+    free(data);
     return storedSSID;
   }
   else if (what == WIFIPW)
   {
-    storedWifiPass = readString(34);
+    data = readString(34);
+    storedWifiPass = String((char *)data);
+    free(data);
     return storedWifiPass;
   }
   else if (what == SOFTSSID)
   {
-    storedSoftSSID = readString(99);
+    data = readString(99);
+    storedSoftSSID = String((char *)data);
+    free(data);
     return storedSoftSSID;
   }
   else if (what == SOFTPW)
   {
-    storedSoftWifiPass = readString(132);
+    data = readString(132);
+    storedSoftWifiPass = String((char *)data);
+    free(data);
     return storedSoftWifiPass;
   }
   else if (what == USERNAME)
   {
-    storedUsername = readString(197);
+    data = readString(197);
+    storedUsername = String((char *)data);
+    free(data);
     return storedUsername;
   }
   else if (what == DEVICETOKEN)
   {
-    storedDeviceToken = readString(230);
+    data = readString(230);
+    storedDeviceToken = String((char *)data);
+    free(data);
     return storedDeviceToken;
   }
-
+  free(data);
   return "INVALID";
 }
 
@@ -669,6 +664,7 @@ void loadAllPrograms()
     memcpy(&progRB2[i], &data[ADDR_PROG_RB2(i) - ADDR_DEVICE_STATUS], 4);
     progAct[i] = data[ADDR_PROG_ACTION(i) - ADDR_DEVICE_STATUS];
   }
+  free(data);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
