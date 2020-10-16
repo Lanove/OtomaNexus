@@ -7,11 +7,13 @@ Todo :
 - Add LED status for WiFi connecting, and setup status
 - Create Shift Register API -- done part
 - Create Analog Input API -- done part
-- Remove != and == from comparator list
-- Lol, the name is operator, not comparator. to be exact, it was relational operators
+- DONE Remove != and == from comparator list
+- DONE Lol, the name is operator, not comparator. to be exact, it was relational operators
 - Lk sempet add OTA Web Server HTTP Update
 - Fix parse input on web automation program
 - Optimize stack usage by moving memory usage to heap with malloc/free/calloc
+- DONE Do reload status just for read-only thing (like temp, humid)
+
 
 Idea : 
 - do something like this on automation program
@@ -48,13 +50,13 @@ Keterangan Pin :
 */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <time.h>
-#include <html.h>
+#include <constants.h>
 
 #include <ArduinoJson.h>
 #include <Wire.h>
@@ -65,43 +67,6 @@ Keterangan Pin :
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
-#define EEPROM_ADDRESS 0x50
-
-#define FB 0
-#define WIFISSID 1
-#define WIFIPW 2
-#define SOFTSSID 3
-#define SOFTPW 4
-#define USERNAME 5
-#define IPADDRESS 6
-#define GATEWAY 7
-#define DEVICETOKEN 8
-
-#define FB_CONNECTED 0
-#define FB_WIFI_ERROR1 1
-#define FB_WIFI_ERROR2 2
-
-#define DHTPIN 13
-#define DHTTYPE DHT11
-
-#define DATA595 15
-#define LATCH595 2
-#define CLOCK595 0
-
-// QA to QH of 595, in sort
-#define LED_STATUS 0
-#define AUX2_RELAY 1
-#define AUX1_RELAY 2
-#define HEATER_RELAY 3
-#define COOLER_RELAY 4
-#define MUX_A 5
-#define MUX_B 6
-#define BUZZER 7
-
-#define ONE_WIRE_BUS 13
-#define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
-
-WiFiClientSecure client;
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200); // 25200 for UTC+7, 3600*(UTC)
@@ -122,10 +87,17 @@ byte storedFirstByte;
 bool serverAvailable;
 bool triedLog = false;
 unsigned long disconnectStamp;
+unsigned long requestMillis;
+unsigned long sensorMillis;
+byte dhtSampleCounter;
 bool disconnectFlag;
 byte byte595Status;
 bool bit595Status;
 byte deviceStatus;
+
+float newTemp;
+float newHumid;
+
 int thermalSetPoint;
 float heaterKp;
 float heaterKi;
@@ -157,6 +129,7 @@ byte byteReadFB();
 void byteWriteFB(byte data);
 bool bitReadFB(byte docchi);
 void bitWriteFB(byte docchi, bool status);
+void loadAllPrograms();
 
 void loadInfo();
 bool initiateSoftAP();
@@ -197,10 +170,7 @@ void setup(void)
   storedDeviceToken.reserve(10);
   Serial.begin(74880); // Start the Serial communication to send messages to the computer
 
-  Serial.println("START!");
   delay(10);
-  Serial.println('\n');
-  Serial.println("IM HERE!");
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
   debugMemory();
@@ -218,9 +188,51 @@ void setup(void)
   eeprom.initialize();
   ds18b.begin();
   dht.begin();
-  bitWriteFB(FB_CONNECTED, true);
-  Serial.println("IM HERE!!!");
+
   loadInfo();
+  eeprom.writeByte(ADDR_DEVICE_STATUS, 123);
+  delay(10);
+  eeprom.writeByte(ADDR_THERMAL_SETPOINT, 0x2B);
+  delay(10);
+  eeprom.writeByte(ADDR_THERMAL_SETPOINT + 1, 0x2);
+  delay(10);
+  byte lo[4] = {0x7B, 0x14, 0x0E, 0x40};
+  byte li[4] = {0x33, 0x33, 0xF6, 0x42};
+  byte le[4] = {0x9A, 0x99, 0x09, 0x40};
+  byte lu[4] = {0xCD, 0xCC, 0x84, 0x40};
+  eeprom.writeBytes(ADDR_HEATER_KP, 4, lo);
+  eeprom.writeBytes(ADDR_HEATER_KI, 4, lo);
+  eeprom.writeBytes(ADDR_HEATER_KD, 4, lo);
+  eeprom.writeBytes(ADDR_HEATER_DS, 4, li);
+  eeprom.writeBytes(ADDR_HEATER_BA, 4, le);
+  eeprom.writeBytes(ADDR_HEATER_BB, 4, lu);
+
+  eeprom.writeBytes(ADDR_COOLER_KP, 4, lo);
+  eeprom.writeBytes(ADDR_COOLER_KI, 4, lo);
+  eeprom.writeBytes(ADDR_COOLER_KD, 4, lo);
+  eeprom.writeBytes(ADDR_COOLER_DS, 4, li);
+  eeprom.writeBytes(ADDR_COOLER_BA, 4, le);
+  eeprom.writeBytes(ADDR_COOLER_BB, 4, lu);
+  for (uint8_t i = 0; i < 30; i++)
+  {
+    eeprom.writeByte(ADDR_PROG_TRIGGER(i), i);
+    delay(10);
+    eeprom.writeByte(ADDR_PROG_ACTION(i), i);
+    delay(10);
+    byte ko[4] = {i, i + 2, i + 4, i + 8};
+    byte ki[4] = {i + 8, i + 4, i + 2, i};
+    eeprom.writeBytes(ADDR_PROG_RB1(i), 4, ko);
+    eeprom.writeBytes(ADDR_PROG_RB2(i), 4, ki);
+  }
+  debugMemory();
+  loadAllPrograms();
+  debugMemory();
+  Serial.printf("Thermal Setpoint : %d\nHeater Kp: %f\nHeater Ki: %f\nHeater Kd: %f\nHeater Ds: %f\nHeater Ba: %f\nHeater Bb: %f\nCooler Kp: %f\nCooler Ki: %f\nCooler Kd: %f\nCooler Ds: %f\nCooler Ba: %f\nCooler Bb: %f\n", thermalSetPoint, heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb, coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
+  for (uint8_t i = 0; i < 30; i++)
+  {
+    Serial.printf("Trigger Byte : 0x%X\nRB1 Bytes : 0x%X:0x%X:0x%X:0x%X\nRB2 Bytes : 0x%X:0x%X:0x%X:0x%X\nAction Byte : 0x%X\n", progTrig[i], progRB1[i][0], progRB1[i][1], progRB1[i][2], progRB1[i][3], progRB2[i][0], progRB2[i][1], progRB2[i][2], progRB2[i][3], progAct[i]);
+  }
+  delay(10000000);
   Serial.println();
   Serial.print("storedFirstByte : ");
   Serial.println(storedFirstByte);
@@ -234,17 +246,6 @@ void setup(void)
   Serial.println(storedWifiPass);
   Serial.print("storedUsername : ");
   Serial.println(storedUsername);
-  if (!client.setCACert_P(caCert, caCertLen))
-  {
-    Serial.println("Failed to load root CA certificate!");
-    while (true)
-    {
-      delay(500);
-      ESP.restart();
-    }
-  }
-  else
-    Serial.println("CA Certificate Loaded!");
   debugMemory();
 
   byteWrite595(0x00);
@@ -305,8 +306,6 @@ void setup(void)
     if (timeClient.forceUpdate())
     {
       rtc.adjust(DateTime(timeClient.getEpochTime()));
-      client.setX509Time(timeClient.getEpochTime());
-      Serial.println("NTP Clock Acquired");
     }
     else
     {
@@ -323,11 +322,6 @@ void setup(void)
           // do something here
         }
       }
-      else
-      {
-        client.setX509Time(rtc.now().unixtime());
-        Serial.printf("Initializing client x509 time RTC : %lu", rtc.now().unixtime());
-      }
     }
 
     debugMemory();
@@ -337,6 +331,19 @@ void setup(void)
 
 void loop(void)
 {
+  if (millis() - sensorMillis >= SENSOR_DELAY)
+  {
+    dhtSampleCounter++;
+    ds18b.requestTemperatures(); // Send the command to get temperatures
+    newTemp = ds18b.getTempCByIndex(0);
+    if (dhtSampleCounter >= DHT_LOOP)
+    {
+      newHumid = dht.readHumidity();
+      dhtSampleCounter = 0;
+    }
+    sensorMillis = millis();
+  }
+
   if (serverAvailable)
   {
     server.handleClient(); // Listen for HTTP requests from clients
@@ -345,67 +352,71 @@ void loop(void)
   {
     if (isWifiConnected())
     {
-      DateTime now = rtc.now();
-      if (timeClient.update())
+      if (millis() - requestMillis >= REQUEST_DELAY)
       {
-        // If unixtime of RTC is deviating + or - 30 seconds than NTP time then readjust RTC
-        if (timeClient.getEpochTime() > now.unixtime() + 10 || timeClient.getEpochTime() < now.unixtime() - 10)
-          rtc.adjust(DateTime(timeClient.getEpochTime()));
-      }
-      const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(3);
-      DynamicJsonDocument doc(capacity);
-      String json;
-      // Type is splitted by 'n'
-      // t means temperature
-      // h means humidity
-      // s means status of aux1,aux2,th,ht,cl (ordered)
-      // the highest order is t and goes lower to s
-      // so tnhns means ESP8266 is sending temperature and humidity
-      doc["type"] = "tnhns";
-      doc["unix"] = now.unixtime();
-      JsonArray data = doc.createNestedArray("data");
-      data.add(37.16);
-      data.add(80.2);
-      data.add(1);
-      data.add(0);
-      data.add(1);
-      data.add(1);
-      data.add(0);
-      serializeJson(doc, json);
-
-      int httpCode;
-      String response = fetchURL(FPSTR(requestURL), json, httpCode);
-      Serial.printf("Response : %s\n", response.c_str());
-      if (httpCode > 0)
-      {
-        if (httpCode == HTTP_CODE_OK || httpCode >= 500 || (httpCode > 200 && httpCode < 300)) // Successful Fetch or Server Mistake reset disconnectFlag
+        DateTime now = rtc.now();
+        if (timeClient.update())
         {
-          disconnectFlag = false;
-          disconnectStamp = millis();
+          // If unixtime of RTC is deviating + or - 30 seconds than NTP time then readjust RTC
+          if (timeClient.getEpochTime() > now.unixtime() + 10 || timeClient.getEpochTime() < now.unixtime() - 10)
+            rtc.adjust(DateTime(timeClient.getEpochTime()));
         }
-        else if (httpCode >= 400 && httpCode < 500)
+        const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(3);
+        DynamicJsonDocument doc(capacity);
+        String json;
+        // Type is splitted by 'n'
+        // t means temperature
+        // h means humidity
+        // s means status of aux1,aux2,th,ht,cl (ordered)
+        // the highest order is t and goes lower to s
+        // so tnhns means ESP8266 is sending temperature and humidity
+        doc["type"] = "tnhns";
+        doc["unix"] = now.unixtime();
+        JsonArray data = doc.createNestedArray("data");
+
+        data.add(newTemp);
+        data.add(newHumid);
+        data.add(1);
+        data.add(0);
+        data.add(1);
+        data.add(1);
+        data.add(0);
+        serializeJson(doc, json);
+
+        int httpCode;
+        String response = fetchURL(FPSTR(requestURL), json, httpCode);
+        Serial.printf("Response : %s\n", response.c_str());
+        if (httpCode > 0)
+        {
+          if (httpCode == HTTP_CODE_OK || httpCode >= 500 || (httpCode > 200 && httpCode < 300)) // Successful Fetch or Server Mistake reset disconnectFlag
+          {
+            disconnectFlag = false;
+            disconnectStamp = millis();
+          }
+          else if (httpCode >= 400 && httpCode < 500)
+          {
+            disconnectFlag = true;
+            disconnectStamp = millis();
+          }
+          if (httpCode == HTTP_CODE_OK)
+          {
+            if (response == "forget")
+            {
+              bitWriteFB(FB_CONNECTED, false);
+              delay(500);
+              ESP.reset();
+            }
+          }
+        }
+        else
         {
           disconnectFlag = true;
           disconnectStamp = millis();
         }
-        if (httpCode == HTTP_CODE_OK)
-        {
-          if (response == "forget")
-          {
-            bitWriteFB(FB_CONNECTED, false);
-            delay(500);
-            ESP.reset();
-          }
-        }
-      }
-      else
-      {
-        disconnectFlag = true;
-        disconnectStamp = millis();
-      }
 
-      debugMemory();
-      delay(10000);
+        debugMemory();
+        requestMillis = millis();
+      }
     }
     else
     {
@@ -485,7 +496,7 @@ void selectMux(byte channel)
 void storeString(int addrOffset, const String &strToWrite)
 {
   byte len = strToWrite.length();
-  byte data[len];
+  byte *data = (byte *)malloc(sizeof(byte) * (len + 1));
   strToWrite.getBytes(data, len + 1);
   eeprom.writeByte(addrOffset, len);
   delay(10);
@@ -495,7 +506,7 @@ void storeString(int addrOffset, const String &strToWrite)
 const String readString(int addrOffset)
 {
   int newStrLen = eeprom.readByte(addrOffset);
-  byte data[newStrLen + 1];
+  byte *data = (byte *)malloc(sizeof(byte) * (newStrLen + 1));
   eeprom.readBytes(addrOffset + 1, newStrLen, data);
   data[newStrLen] = '\0';
   return String((char *)data);
@@ -630,35 +641,47 @@ void loadInfo()
   if (storedDeviceToken == " ")
     storedDeviceToken = "";
 }
+
+void loadAllPrograms()
+{
+  byte *data = (byte *)malloc(sizeof(byte) * (361)); // From 241 to 601 is
+  eeprom.readBytes(241, 361, data);
+
+  deviceStatus = data[ADDR_DEVICE_STATUS - ADDR_DEVICE_STATUS];
+  memcpy(&thermalSetPoint, &data[ADDR_THERMAL_SETPOINT - ADDR_DEVICE_STATUS], 2);
+  memcpy(&heaterKp, &data[ADDR_HEATER_KP - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&heaterKi, &data[ADDR_HEATER_KI - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&heaterKd, &data[ADDR_HEATER_KD - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&heaterDs, &data[ADDR_HEATER_DS - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&heaterBa, &data[ADDR_HEATER_BA - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&heaterBb, &data[ADDR_HEATER_BB - ADDR_DEVICE_STATUS], sizeof(float));
+
+  memcpy(&coolerKp, &data[ADDR_COOLER_KP - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&coolerKi, &data[ADDR_COOLER_KI - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&coolerKd, &data[ADDR_COOLER_KD - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&coolerDs, &data[ADDR_COOLER_DS - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&coolerBa, &data[ADDR_COOLER_BA - ADDR_DEVICE_STATUS], sizeof(float));
+  memcpy(&coolerBb, &data[ADDR_COOLER_BB - ADDR_DEVICE_STATUS], sizeof(float));
+  for (byte i = 0; i < 30; i++)
+  {
+    progTrig[i] = data[ADDR_PROG_TRIGGER(i) - ADDR_DEVICE_STATUS];
+    memcpy(&progRB1[i], &data[ADDR_PROG_RB1(i) - ADDR_DEVICE_STATUS], 4);
+    memcpy(&progRB2[i], &data[ADDR_PROG_RB2(i) - ADDR_DEVICE_STATUS], 4);
+    progAct[i] = data[ADDR_PROG_ACTION(i) - ADDR_DEVICE_STATUS];
+  }
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /////////////////////////////// SOFT AP, CLIENT AND WEB SERVER API //////////////////////////////////
 const String fetchURL(const String &URL, const String &data, int &responseCode)
 {
-  debugMemory();
-  if (!client.connect("dev.otoma.my.id", 443))
-  {
-    Serial.println("connection failed");
-    responseCode = 408;
-    return "";
-  }
-
-  // Verify validity of server's certificate
-  if (client.verifyCertChain("dev.otoma.my.id"))
-  {
-    Serial.println("Server certificate verified");
-  }
-  else
-  {
-    Serial.println("ERROR: certificate verification failed!");
-    //   return;
-  }
-
-  debugMemory();
+  WiFiClient client;
   HTTPClient http;
   // configure traged server and url
   http.begin(client, URL); //HTTP
   http.addHeader(F("Content-Type"), F("application/json"));
+  http.addHeader(F("Device-Token"), storedDeviceToken);
 
   // start connection and send HTTP header and body
   int httpCode = http.POST(data);
