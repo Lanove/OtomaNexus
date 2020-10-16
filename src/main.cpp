@@ -195,11 +195,6 @@ void setup(void)
 
   loadInfo();
   loadAllPrograms();
-  Serial.printf("Thermal Setpoint : %d\nHeater Kp: %f\nHeater Ki: %f\nHeater Kd: %f\nHeater Ds: %f\nHeater Ba: %f\nHeater Bb: %f\nCooler Kp: %f\nCooler Ki: %f\nCooler Kd: %f\nCooler Ds: %f\nCooler Ba: %f\nCooler Bb: %f\n", thermalSetPoint, heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb, coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
-  for (uint8_t i = 0; i < 30; i++)
-  {
-    Serial.printf("Program %d\nTrigger Byte : 0x%X\nRB1 Bytes : 0x%X:0x%X:0x%X:0x%X\nRB2 Bytes : 0x%X:0x%X:0x%X:0x%X\nAction Byte : 0x%X\n---------------\n", i, progTrig[i], progRB1[i][0], progRB1[i][1], progRB1[i][2], progRB1[i][3], progRB2[i][0], progRB2[i][1], progRB2[i][2], progRB2[i][3], progAct[i]);
-  }
   byteWrite595(0x00);
   closeClient();
   closeSoftAP();
@@ -360,48 +355,61 @@ void loop(void)
             if (out["setpoint"])
             {
               int ibuffer = out["setpoint"].as<int>();
+              thermalSetPoint = ibuffer;
               memcpy(buffer, &ibuffer, 2);
               eeprom.writeBytes(ADDR_THERMAL_SETPOINT, 2, buffer);
             }
             if (out["hpam"])
             {
               float fbuffer = out["hpam"][0].as<float>(); // Kp
+              heaterKp = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_HEATER_KP, 4, buffer);
               fbuffer = out["hpam"][1].as<float>(); // Ki
+              heaterKi = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_HEATER_KI, 4, buffer);
               fbuffer = out["hpam"][2].as<float>(); // Kd
+              heaterKd = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_HEATER_KD, 4, buffer);
               fbuffer = out["hpam"][3].as<float>(); // Ds
+              heaterDs = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_HEATER_DS, 4, buffer);
               fbuffer = out["hpam"][4].as<float>(); // Ba
+              heaterBa = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_HEATER_BA, 4, buffer);
               fbuffer = out["hpam"][5].as<float>(); // Bb
+              heaterBb = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_HEATER_BB, 4, buffer);
             }
             if (out["cpam"])
             {
               float fbuffer = out["cpam"][0].as<float>(); // Kp
+              coolerKp = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_COOLER_KP, 4, buffer);
               fbuffer = out["cpam"][1].as<float>(); // Ki
+              coolerKi = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_COOLER_KI, 4, buffer);
               fbuffer = out["cpam"][2].as<float>(); // Kd
+              coolerKd = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_COOLER_KD, 4, buffer);
               fbuffer = out["cpam"][3].as<float>(); // Ds
+              coolerDs = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_COOLER_DS, 4, buffer);
               fbuffer = out["cpam"][4].as<float>(); // Ba
+              coolerBa = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_COOLER_BA, 4, buffer);
               fbuffer = out["cpam"][5].as<float>(); // Bb
+              coolerBb = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_COOLER_BB, 4, buffer);
               // writeByte mode
@@ -416,21 +424,21 @@ void loop(void)
                 {
                   Serial.printf("Updating program %s\n", num);
                   unsigned long lbuffer = out["prog"][num][0].as<unsigned long>(); // Trigger Type
-                  Serial.println(lbuffer);
                   memcpy(buffer, &lbuffer, 1);
+                  progTrig[i] = buffer[0];
                   eeprom.writeByte(ADDR_PROG_TRIGGER(i), buffer[0]);
                   delay(10);
                   lbuffer = out["prog"][num][1].as<unsigned long>(); // RB 1
-                  Serial.println(lbuffer);
                   memcpy(buffer, &lbuffer, 4);
+                  memcpy(&progRB1[i], buffer, 4);
                   eeprom.writeBytes(ADDR_PROG_RB1(i), 4, buffer);
                   lbuffer = out["prog"][num][2].as<unsigned long>(); // RB 2
-                  Serial.println(lbuffer);
                   memcpy(buffer, &lbuffer, 4);
+                  memcpy(&progRB2[i], buffer, 4);
                   eeprom.writeBytes(ADDR_PROG_RB2(i), 4, buffer);
                   lbuffer = out["prog"][num][3].as<unsigned long>(); // Action Type
-                  Serial.println(lbuffer);
                   memcpy(buffer, &lbuffer, 1);
+                  progAct[i] = buffer[0];
                   eeprom.writeByte(ADDR_PROG_ACTION(i), buffer[0]);
                   delay(10);
                 }
