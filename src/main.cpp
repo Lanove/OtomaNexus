@@ -67,6 +67,7 @@ Keterangan Pin :
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+HTTPClient http;
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200); // 25200 for UTC+7, 3600*(UTC)
@@ -162,6 +163,8 @@ void debugMemory()
 
 void setup(void)
 {
+  Serial.begin(74880); // Start the Serial communication to send messages to the computer
+
   Serial.println("Init");
   debugMemory();
   storedUsername.reserve(32);
@@ -170,14 +173,11 @@ void setup(void)
   storedSoftSSID.reserve(32);
   storedSoftWifiPass.reserve(64);
   storedDeviceToken.reserve(10);
-  Serial.begin(74880); // Start the Serial communication to send messages to the computer
 
   delay(10);
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
 
-  Serial.println("PreLib");
-  debugMemory();
   if (!rtc.begin())
   {
     Serial.println("Couldn't Start RTC!");
@@ -191,32 +191,9 @@ void setup(void)
   eeprom.initialize();
   ds18b.begin();
   dht.begin();
-  Serial.println("AftLib");
-  debugMemory();
 
-  Serial.println("PreLdInfo");
-  debugMemory();
   loadInfo();
-  Serial.println("AftLdInfo");
-  debugMemory();
   loadAllPrograms();
-  Serial.println("AftLdPr");
-  debugMemory();
-
-  Serial.println();
-  Serial.print("storedFirstByte : ");
-  Serial.println(storedFirstByte);
-  Serial.print("storedSoftSSID : ");
-  Serial.println(storedSoftSSID);
-  Serial.print("storedSoftWifiPass : ");
-  Serial.println(storedSoftWifiPass);
-  Serial.print("storedSSID : ");
-  Serial.println(storedSSID);
-  Serial.print("storedWifiPass : ");
-  Serial.println(storedWifiPass);
-  Serial.print("storedUsername : ");
-  Serial.println(storedUsername);
-  debugMemory();
 
   byteWrite595(0x00);
   closeClient();
@@ -272,6 +249,7 @@ void setup(void)
   }
   if (isWifiConnected())
   {
+    http.setReuse(true);
     timeClient.begin(); // If WiFi connection success, start NTP timeClient
     if (timeClient.forceUpdate())
     {
@@ -293,8 +271,6 @@ void setup(void)
         }
       }
     }
-
-    debugMemory();
   }
 
   ds18b.requestTemperatures(); // Send the command to get temperatures
@@ -362,9 +338,13 @@ void loop(void)
         data.add(1);
         data.add(0);
         serializeJson(doc, json);
-
         int httpCode;
+        Serial.println("Fetching...");
+        debugMemory();
         String response = fetchURL(FPSTR(requestURL), json, httpCode);
+        http.end();
+        Serial.println("Fetch Complete");
+        debugMemory();
         Serial.printf("Response : %s\n", response.c_str());
         if (httpCode > 0)
         {
@@ -394,6 +374,7 @@ void loop(void)
           disconnectStamp = millis();
         }
 
+        Serial.println("After Fetch");
         debugMemory();
         requestMillis = millis();
       }
@@ -672,17 +653,24 @@ void loadAllPrograms()
 /////////////////////////////// SOFT AP, CLIENT AND WEB SERVER API //////////////////////////////////
 const String fetchURL(const String &URL, const String &data, int &responseCode)
 {
+  Serial.println("Initialize WiFiClient");
+  debugMemory();
   WiFiClient client;
-  HTTPClient http;
+  Serial.println("HTTP.begin");
+  debugMemory();
   // configure traged server and url
   http.begin(client, URL); //HTTP
   http.addHeader(F("Content-Type"), F("application/json"));
   http.addHeader(F("Device-Token"), storedDeviceToken);
 
+  Serial.println("HTPP Post");
+  debugMemory();
   // start connection and send HTTP header and body
   int httpCode = http.POST(data);
   responseCode = httpCode;
 
+  Serial.println("Fetching URL");
+  debugMemory();
   // httpCode will be negative on error
   if (httpCode > 0)
   {
@@ -697,8 +685,6 @@ const String fetchURL(const String &URL, const String &data, int &responseCode)
   {
     Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
-
-  http.end();
   return "";
 }
 
@@ -861,6 +847,7 @@ void pgAccInfo()
     Serial.printf("JSON Size : %d\n", doc.memoryUsage());
     Serial.printf("Transferred JSON : %s\n", json.c_str());
     responseStatus = fetchURL(FPSTR(identifyURL), json, httpCode);
+    http.end();
     Serial.printf("Code : %d\nResponse : %s\n", httpCode, responseStatus.c_str());
     if (httpCode == HTTP_CODE_OK)
     { // Success fetched!, store the message to responseStatus!
@@ -874,6 +861,7 @@ void pgAccInfo()
     { // It seems that first request is failed, let's wait for 1s and try again for the second time
       delay(1000);
       responseStatus = fetchURL(FPSTR(identifyURL), json, httpCode);
+      http.end();
       if (httpCode == HTTP_CODE_OK)
       { // Success fetched!, store the message to responseStatus!
         if (responseStatus == "success" || responseStatus == "recon")

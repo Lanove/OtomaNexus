@@ -1,0 +1,186 @@
+Stack : 3744
+Heap : 50632
+.......Connected!
+192.168.7.101
+Stack : 2944
+Heap : 49432
+Fetching...
+Stack : 2944
+Heap : 49176
+Initialize WiFiClient
+Stack : 2944
+Heap : 49064
+HTTP.begin
+Stack : 2912
+Heap : 49064
+HTPP Post
+Stack : 2912
+Heap : 48912
+Fetching URL
+Stack : 2544
+Heap : 47144
+[HTTP] POST... failed, error: read Timeout
+Fetch Complete
+Stack : 2544
+Heap : 47272
+Response :
+After Fetch
+Stack : 2544
+Heap : 47272
+Fetching...
+Stack : 2544
+Heap : 47464
+Initialize WiFiClient
+Stack : 2544
+Heap : 47352
+HTTP.begin
+Stack : 2544
+Heap : 47352
+HTPP Post
+Stack : 2544
+Heap : 47200
+Fetching URL
+Stack : 2544
+Heap : 47768
+Fetch Complete
+Stack : 2544
+Heap : 48096
+Response : 31.9375
+After Fetch
+Stack : 2544
+Heap : 48096
+Fetching...
+Stack : 2532
+Heap : 48440
+Initialize WiFiClient
+Stack : 2532
+Heap : 48328
+HTTP.begin
+Stack : 2532
+Heap : 48328
+HTPP Post
+Stack : 2532
+Heap : 48176
+Fetching URL
+Stack : 2432
+Heap : 47576
+Fetch Complete
+Stack : 2432
+Heap : 47904
+Response : 31.9375
+After Fetch
+Stack : 2432
+Heap : 47904
+Fetching...
+Stack : 2432
+Heap : 48248
+Initialize WiFiClient
+Stack : 2432
+Heap : 48136
+HTTP.begin
+Stack : 2432
+Heap : 48136
+HTPP Post
+Stack : 2432
+Heap : 47984
+Fetching URL
+Stack : 2432
+Heap : 47384
+Fetch Complete
+Stack : 2432
+Heap : 47712
+Response : 31.9375
+After Fetch
+Stack : 2432
+Heap : 47712
+Fetching...
+Stack : 2432
+Heap : 48056
+Initialize WiFiClient
+Stack : 2432
+Heap : 47944
+HTTP.begin
+Stack : 2432
+Heap : 47944
+HTPP Post
+Stack : 2432
+Heap : 47792
+Fetching URL
+Stack : 2432
+Heap : 47192
+Fetch Complete
+Stack : 2432
+Heap : 47520
+Response : 31.9375
+After Fetch
+Stack : 2432
+Heap : 47520
+Fetching...
+Stack : 2432
+Heap : 47864
+Initialize WiFiClient
+Stack : 2432
+Heap : 47752
+HTTP.begin
+Stack : 2432
+Heap : 47752
+HTPP Post
+Stack : 2432
+Heap : 47600
+Fetching URL
+Stack : 2432
+Heap : 47000
+Fetch Complete
+Stack : 2432
+Heap : 47328
+Response : 31.9375
+After Fetch
+Stack : 2432
+Heap : 47328
+Fetching...
+Stack : 2432
+Heap : 47672
+Initialize WiFiClient
+Stack : 2432
+Heap : 47560
+HTTP.begin
+Stack : 2432
+Heap : 47560
+HTPP Post
+Stack : 2432
+Heap : 47408
+Fetching URL
+Stack : 2432
+Heap : 47296
+[HTTP] POST... failed, error: connection failed
+Fetch Complete
+Stack : 2432
+Heap : 47368
+Response :
+After Fetch
+Stack : 2432
+Heap : 47368
+Fetching...
+Stack : 2432
+Heap : 47688
+Initialize WiFiClient
+Stack : 2432
+Heap : 47576
+HTTP.begin
+Stack : 2432
+Heap : 47576
+HTPP Post
+Stack : 2432
+Heap : 47424
+Fetching URL
+Stack : 2432
+Heap : 46824
+Fetch Complete
+Stack : 2432
+Heap : 47040
+Response : 31.875
+After Fetch
+Stack : 2432
+Heap : 47040
+
+ ets Jan  8 2013,rst cause:2, boot mode:(1,7)

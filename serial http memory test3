@@ -1,0 +1,379 @@
+load 0x4010f000, len 3584, room 16
+tail 0
+chksum 0xb0
+csum 0xb0
+v2843a5ac
+~ld
+Init
+Stack : 3744
+Heap : 50448
+...........Connected!
+192.168.7.101
+Failed fetching NTP Clock
+Stack : 2800
+Heap : 49360
+Fetching...
+Stack : 2800
+Heap : 48992
+Initialize WiFiClient
+Stack : 2800
+Heap : 48920
+HTTP.begin
+Stack : 2800
+Heap : 48920
+HTPP Post
+Stack : 2800
+Heap : 48768
+Fetching URL
+Stack : 2800
+Heap : 48144
+Fetch Complete
+Stack : 2800
+Heap : 48472
+Response : 31.25
+After Fetch
+Stack : 2800
+Heap : 48472
+Fetching...
+Stack : 2800
+Heap : 48608
+Initialize WiFiClient
+Stack : 2800
+Heap : 48536
+HTTP.begin
+Stack : 2800
+Heap : 48536
+HTPP Post
+Stack : 2800
+Heap : 48536
+Fetching URL
+Stack : 2800
+Heap : 47952
+Fetch Complete
+Stack : 2800
+Heap : 48280
+Response : 31.25
+After Fetch
+Stack : 2800
+Heap : 48280
+Fetching...
+Stack : 2800
+Heap : 48280
+Initialize WiFiClient
+Stack : 2800
+Heap : 48208
+HTTP.begin
+Stack : 2800
+Heap : 48208
+HTPP Post
+Stack : 2800
+Heap : 48208
+Fetching URL
+Stack : 2800
+Heap : 47256
+Fetch Complete
+Stack : 2800
+Heap : 47584
+Response : 31.25
+After Fetch
+Stack : 2800
+Heap : 47584
+Fetching...
+Stack : 2800
+Heap : 47584
+Initialize WiFiClient
+Stack : 2800
+Heap : 47512
+HTTP.begin
+Stack : 2800
+Heap : 47512
+HTPP Post
+Stack : 2800
+Heap : 47512
+Fetching URL
+Stack : 2800
+Heap : 46928
+Fetch Complete
+Stack : 2800
+Heap : 47256
+Response : 31.25
+After Fetch
+Stack : 2800
+Heap : 47256
+Fetching...
+Stack : 2800
+Heap : 47528
+Initialize WiFiClient
+Stack : 2800
+Heap : 47456
+HTTP.begin
+Stack : 2800
+Heap : 47456
+HTPP Post
+Stack : 2800
+Heap : 47456
+Fetching URL
+Stack : 2800
+Heap : 47344
+[HTTP] POST... failed, error: connection failed
+Fetch Complete
+Stack : 2800
+Heap : 47416
+Response :
+After Fetch
+Stack : 2800
+Heap : 47416
+Fetching...
+Stack : 2800
+Heap : 47512
+Initialize WiFiClient
+Stack : 2800
+Heap : 47440
+HTTP.begin
+Stack : 2800
+Heap : 47440
+HTPP Post
+Stack : 2800
+Heap : 47440
+Fetching URL
+Stack : 2688
+Heap : 46856
+Fetch Complete
+Stack : 2688
+Heap : 47184
+Response : 31.1875
+After Fetch
+Stack : 2688
+Heap : 47184
+Fetching...
+Stack : 2688
+Heap : 47320
+Initialize WiFiClient
+Stack : 2688
+Heap : 47248
+HTTP.begin
+Stack : 2688
+Heap : 47248
+HTPP Post
+Stack : 2688
+Heap : 47248
+Fetching URL
+Stack : 2688
+Heap : 46664
+Fetch Complete
+Stack : 2688
+Heap : 46992
+Response : 31.1875
+After Fetch
+Stack : 2688
+Heap : 46992
+Fetching...
+Stack : 2688
+Heap : 47144
+Initialize WiFiClient
+Stack : 2688
+Heap : 47072
+HTTP.begin
+Stack : 2688
+Heap : 47072
+HTPP Post
+Stack : 2688
+Heap : 47072
+Fetching URL
+Stack : 2688
+Heap : 46488
+Fetch Complete
+Stack : 2688
+Heap : 46816
+Response : 31.25
+After Fetch
+Stack : 2688
+Heap : 46816
+Fetching...
+Stack : 2688
+Heap : 47144
+Initialize WiFiClient
+Stack : 2688
+Heap : 47072
+HTTP.begin
+Stack : 2688
+Heap : 47072
+HTPP Post
+Stack : 2688
+Heap : 47072
+Fetching URL
+Stack : 2688
+Heap : 46488
+Fetch Complete
+Stack : 2688
+Heap : 46816
+Response : 31.25
+After Fetch
+Stack : 2688
+Heap : 46816
+Fetching...
+Stack : 2688
+Heap : 47144
+Initialize WiFiClient
+Stack : 2688
+Heap : 47072
+HTTP.begin
+Stack : 2688
+Heap : 47072
+HTPP Post
+Stack : 2688
+Heap : 47072
+Fetching URL
+Stack : 2688
+Heap : 46488
+Fetch Complete
+Stack : 2688
+Heap : 46816
+Response : 31.25
+After Fetch
+Stack : 2688
+Heap : 46816
+Fetching...
+Stack : 2688
+Heap : 47144
+Initialize WiFiClient
+Stack : 2688
+Heap : 47072
+HTTP.begin
+Stack : 2688
+Heap : 47072
+HTPP Post
+Stack : 2688
+Heap : 47072
+Fetching URL
+Stack : 2688
+Heap : 46488
+Fetch Complete
+Stack : 2688
+Heap : 46816
+Response : 31.25
+After Fetch
+Stack : 2688
+Heap : 46816
+Fetching...
+Stack : 2688
+Heap : 47144
+Initialize WiFiClient
+Stack : 2688
+Heap : 47072
+HTTP.begin
+Stack : 2688
+Heap : 47072
+HTPP Post
+Stack : 2688
+Heap : 47072
+Fetching URL
+Stack : 2688
+Heap : 46488
+Fetch Complete
+Stack : 2688
+Heap : 46816
+Response : 31.25
+After Fetch
+Stack : 2688
+Heap : 46816
+Fetching...
+Stack : 2688
+Heap : 47144
+Initialize WiFiClient
+Stack : 2688
+Heap : 47072
+HTTP.begin
+Stack : 2688
+Heap : 47072
+HTPP Post
+Stack : 2688
+Heap : 47072
+Fetching URL
+Stack : 2544
+Heap : 46488
+Fetch Complete
+Stack : 2544
+Heap : 46816
+Response : 31.25
+After Fetch
+Stack : 2544
+Heap : 46816
+Fetching...
+Stack : 2544
+Heap : 47144
+Initialize WiFiClient
+Stack : 2544
+Heap : 47072
+HTTP.begin
+Stack : 2544
+Heap : 47072
+HTPP Post
+Stack : 2544
+Heap : 47072
+Fetching URL
+Stack : 2544
+Heap : 46488
+Fetch Complete
+Stack : 2544
+Heap : 46816
+Response : 31.25
+After Fetch
+Stack : 2544
+Heap : 46816
+Fetching...
+Stack : 2544
+Heap : 46816
+Initialize WiFiClient
+Stack : 2544
+Heap : 46744
+HTTP.begin
+Stack : 2544
+Heap : 46744
+HTPP Post
+Stack : 2544
+Heap : 46744
+Fetching URL
+Stack : 2544
+Heap : 46488
+Fetch Complete
+Stack : 2544
+Heap : 46816
+Response : 31.25
+After Fetch
+Stack : 2544
+Heap : 46816
+Fetching...
+Stack : 2544
+Heap : 47128
+Initialize WiFiClient
+Stack : 2544
+Heap : 47056
+HTTP.begin
+Stack : 2544
+Heap : 47056
+HTPP Post
+Stack : 2544
+Heap : 47056
+Fetching URL
+Stack : 2544
+Heap : 46472
+Fetch Complete
+Stack : 2544
+Heap : 46800
+Response : 31.1875
+After Fetch
+Stack : 2544
+Heap : 46800
+Fetching...
+Stack : 2544
+Heap : 47128
+Initialize WiFiClient
+Stack : 2544
+Heap : 47056
+HTTP.begin
+Stack : 2544
+Heap : 47056
+HTPP Post
+Stack : 2544
+Heap : 47056
