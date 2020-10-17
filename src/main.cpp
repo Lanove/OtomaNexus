@@ -1,7 +1,7 @@
 /*
 Todo :
 - Add softSSID,softPW,softIPAddress at setting menu of otoma web
-- Check last update of ESP8266 on server to notify the user when the ESP8266 is not updating for more than 5 minute (because disconnect)
+- DONE Check last update of ESP8266 on server to notify the user when the ESP8266 is not updating for more than 5 minute (because disconnect)
 - Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
 - Add buzzer notification for WiFi fail connect, disconnect, time out.
 - Add LED status for WiFi connecting, and setup status
@@ -179,6 +179,7 @@ void setup(void)
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
 
+  Serial.println("im heare");
   if (!rtc.begin())
   {
     Serial.println("Couldn't Start RTC!");
@@ -192,13 +193,21 @@ void setup(void)
   eeprom.initialize();
   ds18b.begin();
   dht.begin();
-
+  Serial.println("im here");
   loadInfo();
   loadAllPrograms();
+  Serial.printf("Thermal Setpoint : %d\nHeater Mode : %s\nHeater Kp: %f\nHeater Ki: %f\nHeater Kd: %f\nHeater Ds: %f\nHeater Ba: %f\nHeater Bb: %f\nCooler Mode : %s\nCooler Kp: %f\nCooler Ki: %f\nCooler Kd: %f\nCooler Ds: %f\nCooler Ba: %f\nCooler Bb: %f\n", thermalSetPoint, (bitRead(deviceStatus, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb, (bitRead(deviceStatus, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
+  Serial.printf("Thermocontroller Info\nTherco Operation : %s\nTherco Mode %s\n", (bitRead(deviceStatus, BITPOS_TC_OPERATION)) ? "MANUAL" : "MODE", (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "HEATER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "COOLER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "DUAL" : "INVALID");
+  Serial.printf("Status\nAux Status 1 : %d\nAux Status 2 : %d\nThermocontrol Status : %d\nHeater Status : %d\nCooler Status : %d\n", bitRead(deviceStatus, BITPOS_AUX1_STATUS), bitRead(deviceStatus, BITPOS_AUX2_STATUS), bitRead(deviceStatus, BITPOS_TC_STATUS), bitRead(deviceStatus, BITPOS_HEATER_STATUS), bitRead(deviceStatus, BITPOS_COOLER_STATUS));
+  for (uint8_t i = 0; i < 30; i++)
+  {
+    Serial.printf("Trigger Type : %d\nRB1 : 0x%X%X%X%X,\nRB2 : 0x%X%X%X%X\nAction Type : %d\n", progTrig[i], progRB1[i][3], progRB1[i][2], progRB1[i][1], progRB1[i][0], progRB2[i][3], progRB2[i][2], progRB2[i][1], progRB2[i][0], progAct[i]);
+  }
   byteWrite595(0x00);
   closeClient();
   closeSoftAP();
   closeServer();
+  Serial.println("im here2");
   if (!bitReadFB(FB_CONNECTED))
   {
     initiateSoftAP();
@@ -352,10 +361,12 @@ void loop(void)
           {
             Serial.println(order);
             byte *buffer = (byte *)malloc(4);
+
             if (out["setpoint"])
             {
               int ibuffer = out["setpoint"].as<int>();
               thermalSetPoint = ibuffer;
+              Serial.printf("Received Setpoint Update!\nthermalSetPoint : %d\n", thermalSetPoint);
               memcpy(buffer, &ibuffer, 2);
               eeprom.writeBytes(ADDR_THERMAL_SETPOINT, 2, buffer);
             }
@@ -385,6 +396,11 @@ void loop(void)
               heaterBb = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_HEATER_BB, 4, buffer);
+
+              bitWrite(deviceStatus, BITPOS_HEATER_MODE, out["hmd"].as<bool>());
+              eeprom.writeByte(ADDR_DEVICE_STATUS, deviceStatus);
+              delay(10);
+              Serial.printf("Received Heater Param Update!\nhHeater Mode : %s\nheaterKp : %f\nheaterKi : %f\nheaterKd : %f\nheaterDs : %f\nheaterBa : %f\nheaterBb : %f\n", (bitRead(deviceStatus, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb);
             }
             if (out["cpam"])
             {
@@ -412,7 +428,37 @@ void loop(void)
               coolerBb = fbuffer;
               memcpy(buffer, &fbuffer, 4);
               eeprom.writeBytes(ADDR_COOLER_BB, 4, buffer);
+              bitWrite(deviceStatus, BITPOS_COOLER_MODE, out["cmd"].as<bool>());
+              eeprom.writeByte(ADDR_DEVICE_STATUS, deviceStatus);
+              delay(10);
               // writeByte mode
+              Serial.printf("Received Cooler Param Update!\nCooler Mode : %s\ncoolerKp : %f\ncoolerKi : %f\ncoolerKd : %f\ncoolerDs : %f\ncoolerBa : %f\ncoolerBb : %f\n", (bitRead(deviceStatus, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
+            }
+            if (out["status"])
+            {
+              if (out["status"]["auxStatus1"])
+                bitWrite(deviceStatus, BITPOS_AUX1_STATUS, out["status"]["auxStatus1"].as<bool>());
+              if (out["status"]["auxStatus2"])
+                bitWrite(deviceStatus, BITPOS_AUX2_STATUS, out["status"]["auxStatus2"].as<bool>());
+              if (out["status"]["thStatus"])
+                bitWrite(deviceStatus, BITPOS_TC_STATUS, out["status"]["thStatus"].as<bool>());
+              if (out["status"]["htStatus"])
+                bitWrite(deviceStatus, BITPOS_HEATER_STATUS, out["status"]["htStatus"].as<bool>());
+              if (out["status"]["clStatus"])
+                bitWrite(deviceStatus, BITPOS_COOLER_STATUS, out["status"]["clStatus"].as<bool>());
+              eeprom.writeByte(ADDR_DEVICE_STATUS, deviceStatus);
+              delay(10);
+              Serial.printf("Received Status Update\nAux Status 1 : %d\nAux Status 2 : %d\nThermocontrol Status : %d\nHeater Status : %d\nCooler Status : %d\n", bitRead(deviceStatus, BITPOS_AUX1_STATUS), bitRead(deviceStatus, BITPOS_AUX2_STATUS), bitRead(deviceStatus, BITPOS_TC_STATUS), bitRead(deviceStatus, BITPOS_HEATER_STATUS), bitRead(deviceStatus, BITPOS_COOLER_STATUS));
+            }
+            if (out["tcm"])
+            {
+              //
+              bitWrite(deviceStatus, BITPOS_TC_OPERATION, out["tcm"][0].as<bool>());
+              bitWrite(deviceStatus, BITPOS_TC_MODE_B0, out["tcm"][1].as<bool>());
+              bitWrite(deviceStatus, BITPOS_TC_MODE_B1, out["tcm"][2].as<bool>());
+              eeprom.writeByte(ADDR_DEVICE_STATUS, deviceStatus);
+              delay(10);
+              Serial.printf("Received Thermalcontroller Update\nTherco Operation : %s\nTherco Mode %s\n", (bitRead(deviceStatus, BITPOS_TC_OPERATION)) ? "MANUAL" : "MODE", (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "HEATER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "COOLER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "DUAL" : "INVALID");
             }
             if (out["prog"])
             {
@@ -428,19 +474,23 @@ void loop(void)
                   progTrig[i] = buffer[0];
                   eeprom.writeByte(ADDR_PROG_TRIGGER(i), buffer[0]);
                   delay(10);
-                  lbuffer = out["prog"][num][1].as<unsigned long>(); // RB 1
-                  memcpy(buffer, &lbuffer, 4);
-                  memcpy(&progRB1[i], buffer, 4);
-                  eeprom.writeBytes(ADDR_PROG_RB1(i), 4, buffer);
-                  lbuffer = out["prog"][num][2].as<unsigned long>(); // RB 2
-                  memcpy(buffer, &lbuffer, 4);
-                  memcpy(&progRB2[i], buffer, 4);
-                  eeprom.writeBytes(ADDR_PROG_RB2(i), 4, buffer);
-                  lbuffer = out["prog"][num][3].as<unsigned long>(); // Action Type
-                  memcpy(buffer, &lbuffer, 1);
-                  progAct[i] = buffer[0];
-                  eeprom.writeByte(ADDR_PROG_ACTION(i), buffer[0]);
-                  delay(10);
+                  if (out["prog"][num][1] && out["prog"][num][2] && out["prog"][num][3])
+                  {
+                    lbuffer = out["prog"][num][1].as<unsigned long>(); // RB 1
+                    memcpy(buffer, &lbuffer, 4);
+                    memcpy(&progRB1[i], buffer, 4);
+                    eeprom.writeBytes(ADDR_PROG_RB1(i), 4, buffer);
+                    lbuffer = out["prog"][num][2].as<unsigned long>(); // RB 2
+                    memcpy(buffer, &lbuffer, 4);
+                    memcpy(&progRB2[i], buffer, 4);
+                    eeprom.writeBytes(ADDR_PROG_RB2(i), 4, buffer);
+                    lbuffer = out["prog"][num][3].as<unsigned long>(); // Action Type
+                    memcpy(buffer, &lbuffer, 1);
+                    progAct[i] = buffer[0];
+                    eeprom.writeByte(ADDR_PROG_ACTION(i), buffer[0]);
+                    delay(10);
+                  }
+                  Serial.printf("Trigger Type : %d\nRB1 : 0x%X%X%X%X,\nRB2 : 0x%X%X%X%X\nAction Type : %d\n", progTrig[i], progRB1[i][3], progRB1[i][2], progRB1[i][1], progRB1[i][0], progRB2[i][3], progRB2[i][2], progRB2[i][1], progRB2[i][0], progAct[i]);
                 }
               }
               free(num);
@@ -722,8 +772,8 @@ void loadInfo()
 
 void loadAllPrograms()
 {
-  byte *data = (byte *)malloc(sizeof(byte) * (361)); // From 241 to 601 is
-  eeprom.readBytes(241, 361, data);
+  byte *data = (byte *)malloc(sizeof(byte) * (PROG_LENGTH)); // From 241 to 601
+  eeprom.readBytes(ADDR_DEVICE_STATUS, PROG_LENGTH, data);
 
   deviceStatus = data[ADDR_DEVICE_STATUS - ADDR_DEVICE_STATUS];
   memcpy(&thermalSetPoint, &data[ADDR_THERMAL_SETPOINT - ADDR_DEVICE_STATUS], 2);
