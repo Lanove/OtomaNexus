@@ -626,12 +626,15 @@ void programScan()
   // 0 is heater, 1 is cooler, 2 is aux1, 3 is aux2
   statusBuffer = (bool *)malloc(10);
   // The algorithm that set PID Mode is just straight, the ifs is not there
+  statusBuffer[0] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
+  statusBuffer[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
+  statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
+  statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
   if (heaterPID.GetMode() == AUTOMATIC)
   {
     heaterPID.Compute();
     if (millis() - heaterWindowStart > (unsigned long)heaterDs)
     {
-      Serial.printf("heaterPidOutput : %f\nGet Output Limit: %f", heaterPidOutput, heaterPID.GetMaxOutLimit());
       //time to shift the Relay Window
       heaterWindowStart += (unsigned long)heaterDs;
     }
@@ -680,6 +683,12 @@ void programScan()
   }
   bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
   bitWrite595(SFT_COOLER_RELAY, statusBuffer[1]);
+  bitWrite595(SFT_AUX1_RELAY, statusBuffer[2]);
+  bitWrite595(SFT_AUX2_RELAY, statusBuffer[3]);
+  bitWrite(deviceStatus, BITPOS_HEATER_STATUS, statusBuffer[0]);
+  bitWrite(deviceStatus, BITPOS_COOLER_STATUS, statusBuffer[1]);
+  bitWrite(deviceStatus, BITPOS_AUX1_STATUS, statusBuffer[2]);
+  bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[3]);
   free(statusBuffer);
 }
 
