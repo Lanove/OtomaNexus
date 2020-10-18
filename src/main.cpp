@@ -115,6 +115,7 @@ float heaterPidOutput;
 unsigned long heaterWindowStart;
 PID heaterPID(&newTemp, &heaterPidOutput, &thermalSetPoint, heaterKp, heaterKi, heaterKd, DIRECT);
 
+bool heaterHysteresis;
 float heaterBa;
 float heaterBb;
 
@@ -128,6 +129,7 @@ PID coolerPID(&newTemp, &coolerPidOutput, &thermalSetPoint, coolerKp, coolerKi, 
 
 float coolerBa;
 float coolerBb;
+bool coolerHysteresis;
 
 byte progTrig[30];
 byte progRB1[30][4];
@@ -215,7 +217,7 @@ void setup(void)
   newTemp = ds18b.getTempCByIndex(0);
   newHumid = dht.readHumidity();
   heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
-  heaterPID.SetOutputLimits(0, coolerDs);
+  heaterPID.SetOutputLimits(0, heaterDs);
 
   if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
       bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID &&
@@ -226,7 +228,7 @@ void setup(void)
   else
     heaterPID.SetMode(MANUAL);
   coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
-  coolerPID.SetOutputLimits(0, heaterDs);
+  coolerPID.SetOutputLimits(0, coolerDs);
   if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
       bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID &&
       bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
@@ -236,7 +238,7 @@ void setup(void)
   else
     coolerPID.SetMode(MANUAL);
 
-  programScanner.attach(0.1, programScan);
+  programScanner.attach(0.05, programScan);
   byteWrite595(0x00);
   closeClient();
   closeSoftAP();
@@ -355,7 +357,6 @@ void loop(void)
     sensorMillis = millis();
     free(sensorBuffer);
   }
-
   if (serverAvailable)
   {
     server.handleClient(); // Listen for HTTP requests from clients
@@ -624,22 +625,32 @@ void programScan()
   bool *statusBuffer;
   // 0 is heater, 1 is cooler, 2 is aux1, 3 is aux2
   statusBuffer = (bool *)malloc(10);
+  // The algorithm that set PID Mode is just straight, the ifs is not there
   if (heaterPID.GetMode() == AUTOMATIC)
   {
     heaterPID.Compute();
-    Serial.printf("heaterPidOutput : %f\n", heaterPidOutput);
-
     if (millis() - heaterWindowStart > (unsigned long)heaterDs)
     {
+      Serial.printf("heaterPidOutput : %f\nGet Output Limit: %f", heaterPidOutput, heaterPID.GetMaxOutLimit());
       //time to shift the Relay Window
-      Serial.printf("heaterWindowStart : %lu\n", heaterWindowStart);
       heaterWindowStart += (unsigned long)heaterDs;
     }
     if ((unsigned long)heaterPidOutput < millis() - heaterWindowStart)
-      statusBuffer[0] = HIGH;
+      statusBuffer[0] = MATI;
     else
-      statusBuffer[0] = LOW;
-    Serial.printf("millis() - heaterWindowStart : %lu\n", millis() - heaterWindowStart);
+      statusBuffer[0] = MURUP;
+  }
+  else if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
+           bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_HYSTERESIS &&
+           bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
+           ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
+            (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
+  { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
+    if (newTemp >= thermalSetPoint + heaterBa)
+      heaterHysteresis = MATI;
+    else if (newTemp <= thermalSetPoint - heaterBb)
+      heaterHysteresis = MURUP;
+    statusBuffer[0] = heaterHysteresis;
   }
   if (coolerPID.GetMode() == AUTOMATIC)
   {
@@ -650,12 +661,25 @@ void programScan()
       coolerWindowStart += (unsigned long)coolerDs;
     }
     if ((unsigned long)coolerPidOutput < millis() - coolerWindowStart)
-      statusBuffer[1] = HIGH;
+      statusBuffer[1] = MATI;
     else
-      statusBuffer[1] = LOW;
+      statusBuffer[1] = MURUP;
   }
-  bitWrite595(SFT_HEATER_RELAY, !statusBuffer[0]);
-  bitWrite595(SFT_COOLER_RELAY, !statusBuffer[1]);
+  else if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
+           bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_HYSTERESIS &&
+           bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
+           ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
+            (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
+  { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
+    Serial.println("cooler hysteresis");
+    if (newTemp >= thermalSetPoint + coolerBa)
+      coolerHysteresis = MURUP;
+    else if (newTemp <= thermalSetPoint - coolerBb)
+      coolerHysteresis = MATI;
+    statusBuffer[1] = coolerHysteresis;
+  }
+  bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
+  bitWrite595(SFT_COOLER_RELAY, statusBuffer[1]);
   free(statusBuffer);
 }
 
