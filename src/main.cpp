@@ -1,18 +1,21 @@
 /*
 Todo :
 - Add softSSID,softPW,softIPAddress at setting menu of otoma web
-- DONE Check last update of ESP8266 on server to notify the user when the ESP8266 is not updating for more than 5 minute (because disconnect)
-- Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
+DONE Check last update of ESP8266 on server to notify the user when the ESP8266 is not updating for more than 5 minute (because disconnect)
+CANCELLED Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
 - Add buzzer notification for WiFi fail connect, disconnect, time out.
 - Add LED status for WiFi connecting, and setup status
-- Create Shift Register API -- done part
-- Create Analog Input API -- done part
-- DONE Remove != and == from comparator list
-- DONE Lol, the name is operator, not comparator. to be exact, it was relational operators
+DONE Create Shift Register API -- done part
+POSTPONED Create Analog Input API -- done part
+DONE Remove != and == from comparator list
+DONE Lol, the name is operator, not comparator. to be exact, it was relational operators
 - Lk sempet add OTA Web Server HTTP Update
 - Fix parse input on web automation program
 - Optimize stack usage by moving memory usage to heap with malloc/free/calloc
-- DONE Do reload status just for read-only thing (like temp, humid)
+DONE Do reload status just for read-only thing (like temp, humid)
+- Add timeout response for AJAX on web
+- Please remove that useless auto filter of pid/hys parameter input
+- Create our own parser for jadwal harian picker (fkin buggy)
 
 
 Idea : 
@@ -210,35 +213,20 @@ void setup(void)
   Serial.printf("Status\nAux Status 1 : %d\nAux Status 2 : %d\nThermocontrol Status : %d\nHeater Status : %d\nCooler Status : %d\n", bitRead(deviceStatus, BITPOS_AUX1_STATUS), bitRead(deviceStatus, BITPOS_AUX2_STATUS), bitRead(deviceStatus, BITPOS_TC_STATUS), bitRead(deviceStatus, BITPOS_HEATER_STATUS), bitRead(deviceStatus, BITPOS_COOLER_STATUS));
   for (uint8_t i = 0; i < 30; i++)
   {
-    Serial.printf("Program Number %d\nTrigger Type : %d\nRB1 : 0x%X%X%X%X,\nRB2 : 0x%X%X%X%X\nAction Type : %d\n", i, progTrig[i], progRB1[i][3], progRB1[i][2], progRB1[i][1], progRB1[i][0], progRB2[i][3], progRB2[i][2], progRB2[i][1], progRB2[i][0], progAct[i]);
+    if (progTrig[i] != 0)
+      Serial.printf("-----------------\nProgram Number %d\nTrigger Type : %d\nRB1 : 0x%X%X%X%X,\nRB2 : 0x%X%X%X%X\nAction Type : %d\n-----------------\n", i, progTrig[i], progRB1[i][3], progRB1[i][2], progRB1[i][1], progRB1[i][0], progRB2[i][3], progRB2[i][2], progRB2[i][1], progRB2[i][0], progAct[i]);
   }
 
   ds18b.requestTemperatures(); // Send the command to get temperatures
   newTemp = ds18b.getTempCByIndex(0);
   newHumid = dht.readHumidity();
+
   heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
   heaterPID.SetOutputLimits(0, heaterDs);
 
-  if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-      bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID &&
-      bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
-      ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
-    heaterPID.SetMode(AUTOMATIC);
-  else
-    heaterPID.SetMode(MANUAL);
   coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
   coolerPID.SetOutputLimits(0, coolerDs);
-  if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-      bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID &&
-      bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
-      ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
-    coolerPID.SetMode(AUTOMATIC);
-  else
-    coolerPID.SetMode(MANUAL);
 
-  programScanner.attach(0.05, programScan);
   byteWrite595(0x00);
   closeClient();
   closeSoftAP();
@@ -252,7 +240,7 @@ void setup(void)
   else
   {
     int timeOutCounter = 0;
-    while (timeOutCounter < 5) // Try for maximum of 5 attempts
+    while (timeOutCounter < 2) // Try for maximum of 5 attempts
     {
       if (initiateClient(storedSSID, storedWifiPass))
       {
@@ -262,10 +250,10 @@ void setup(void)
       }
       timeOutCounter++;
     }
-    if (timeOutCounter >= 5) // If timed out for 5 attempts after 2 reboot, rollback to softAP mode and reset FB
+    if (timeOutCounter >= 2) // If timed out for 5 attempts after 2 reboot, rollback to softAP mode and reset FB
     {
       Serial.println("Fail reconnect WiFi");
-      if (bitReadFB(!FB_WIFI_ERROR1))
+      if (!bitReadFB(FB_WIFI_ERROR1))
       {
         Serial.println("Rebooting attempt 1");
         bitWriteFB(FB_WIFI_ERROR1, true);
@@ -274,7 +262,7 @@ void setup(void)
       }
       else
       {
-        if (bitReadFB(!FB_WIFI_ERROR2))
+        if (!bitReadFB(FB_WIFI_ERROR2))
         {
           Serial.println("Rebooting attempt 2");
           bitWriteFB(FB_WIFI_ERROR2, true);
@@ -303,7 +291,8 @@ void setup(void)
     else
     {
       Serial.println("Failed fetching NTP Clock");
-      if (!rtc.isrunning())
+      DateTime now = rtc.now();
+      if (!rtc.isrunning() || now < 1577836800)
       {
         Serial.println("Could'nt Initiate RTC!");
         // We're fucked up my friend, RTC is not running and can't fetch NTP time, so we'll stop right there too
@@ -318,6 +307,7 @@ void setup(void)
     }
   }
 
+  programScanner.attach(0.05, programScan);
   debugMemory();
 }
 
@@ -428,7 +418,7 @@ void loop(void)
                 {
                   float ibuffer = out["setpoint"].as<float>();
                   thermalSetPoint = ibuffer;
-                  Serial.printf("Received Setpoint Update!\nthermalSetPoint : %d\n", thermalSetPoint);
+                  Serial.printf("Received Setpoint Update!\nthermalSetPoint : %f\n", thermalSetPoint);
                   memcpy(buffer, &ibuffer, 4);
                   eeprom.writeBytes(ADDR_THERMAL_SETPOINT, 4, buffer);
                 }
@@ -504,12 +494,14 @@ void loop(void)
                   if (!out["auxStatus2"].isNull())
                     bitWrite(deviceStatus, BITPOS_AUX2_STATUS, out["auxStatus2"].as<bool>());
                   if (!out["thStatus"].isNull())
+                  {
                     bitWrite(deviceStatus, BITPOS_TC_STATUS, out["thStatus"].as<bool>());
+                    eeprom.writeByte(ADDR_DEVICE_STATUS, deviceStatus);
+                  }
                   if (!out["htStatus"].isNull())
                     bitWrite(deviceStatus, BITPOS_HEATER_STATUS, out["htStatus"].as<bool>());
                   if (!out["clStatus"].isNull())
                     bitWrite(deviceStatus, BITPOS_COOLER_STATUS, out["clStatus"].as<bool>());
-                  eeprom.writeByte(ADDR_DEVICE_STATUS, deviceStatus);
                   delay(10);
                   Serial.printf("Received Status Update\nAux Status 1 : %d\nAux Status 2 : %d\nThermocontrol Status : %d\nHeater Status : %d\nCooler Status : %d\n", bitRead(deviceStatus, BITPOS_AUX1_STATUS), bitRead(deviceStatus, BITPOS_AUX2_STATUS), bitRead(deviceStatus, BITPOS_TC_STATUS), bitRead(deviceStatus, BITPOS_HEATER_STATUS), bitRead(deviceStatus, BITPOS_COOLER_STATUS));
                 }
@@ -537,47 +529,25 @@ void loop(void)
                       progTrig[i] = buffer[0];
                       eeprom.writeByte(ADDR_PROG_TRIGGER(i), buffer[0]);
                       delay(10);
-                      if (out["prog"][num][1] && out["prog"][num][2] && out["prog"][num][3])
-                      {
-                        lbuffer = out["prog"][num][1].as<unsigned long>(); // RB 1
-                        memcpy(buffer, &lbuffer, 4);
-                        memcpy(&progRB1[i], buffer, 4);
-                        eeprom.writeBytes(ADDR_PROG_RB1(i), 4, buffer);
-                        lbuffer = out["prog"][num][2].as<unsigned long>(); // RB 2
-                        memcpy(buffer, &lbuffer, 4);
-                        memcpy(&progRB2[i], buffer, 4);
-                        eeprom.writeBytes(ADDR_PROG_RB2(i), 4, buffer);
-                        lbuffer = out["prog"][num][3].as<unsigned long>(); // Action Type
-                        memcpy(buffer, &lbuffer, 1);
-                        progAct[i] = buffer[0];
-                        eeprom.writeByte(ADDR_PROG_ACTION(i), buffer[0]);
-                        delay(10);
-                      }
+                      lbuffer = out["prog"][num][1].as<unsigned long>(); // RB 1
+                      memcpy(buffer, &lbuffer, 4);
+                      memcpy(&progRB1[i], buffer, 4);
+                      eeprom.writeBytes(ADDR_PROG_RB1(i), 4, buffer);
+                      lbuffer = out["prog"][num][2].as<unsigned long>(); // RB 2
+                      memcpy(buffer, &lbuffer, 4);
+                      memcpy(&progRB2[i], buffer, 4);
+                      eeprom.writeBytes(ADDR_PROG_RB2(i), 4, buffer);
+                      lbuffer = out["prog"][num][3].as<unsigned long>(); // Action Type
+                      memcpy(buffer, &lbuffer, 1);
+                      progAct[i] = buffer[0];
+                      eeprom.writeByte(ADDR_PROG_ACTION(i), buffer[0]);
+                      delay(10);
+
                       Serial.printf("Trigger Type : %d\nRB1 : 0x%X%X%X%X,\nRB2 : 0x%X%X%X%X\nAction Type : %d\n", progTrig[i], progRB1[i][3], progRB1[i][2], progRB1[i][1], progRB1[i][0], progRB2[i][3], progRB2[i][2], progRB2[i][1], progRB2[i][0], progAct[i]);
                     }
                   }
                   free(num);
                 }
-
-                if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-                    bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID &&
-                    bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
-                    ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-                     (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
-                  heaterPID.SetMode(AUTOMATIC);
-                else
-                  heaterPID.SetMode(MANUAL);
-                coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
-                coolerPID.SetOutputLimits(0, heaterDs);
-                if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-                    bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID &&
-                    bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
-                    ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-                     (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
-                  coolerPID.SetMode(AUTOMATIC);
-                else
-                  coolerPID.SetMode(MANUAL);
-
                 free(buffer);
               }
             }
@@ -630,8 +600,14 @@ void programScan()
   statusBuffer[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
   statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
   statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
-  if (heaterPID.GetMode() == AUTOMATIC)
+  if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
+      bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID &&
+      bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
+      ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
+       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
   {
+    if (heaterPID.GetMode() == MANUAL)
+      heaterPID.SetMode(AUTOMATIC);
     heaterPID.Compute();
     if (millis() - heaterWindowStart > (unsigned long)heaterDs)
     {
@@ -649,14 +625,22 @@ void programScan()
            ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
             (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
   { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
+    if (heaterPID.GetMode() == AUTOMATIC)
+      heaterPID.SetMode(MANUAL);
     if (newTemp >= thermalSetPoint + heaterBa)
       heaterHysteresis = MATI;
     else if (newTemp <= thermalSetPoint - heaterBb)
       heaterHysteresis = MURUP;
     statusBuffer[0] = heaterHysteresis;
   }
-  if (coolerPID.GetMode() == AUTOMATIC)
+  if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
+      bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID &&
+      bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
+      ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
+       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
   {
+    if (coolerPID.GetMode() == MANUAL)
+      coolerPID.SetMode(AUTOMATIC);
     coolerPID.Compute();
     if (millis() - coolerWindowStart > (unsigned long)coolerDs)
     {
@@ -674,13 +658,147 @@ void programScan()
            ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
             (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
   { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
-    Serial.println("cooler hysteresis");
+    if (coolerPID.GetMode() == AUTOMATIC)
+      coolerPID.SetMode(MANUAL);
     if (newTemp >= thermalSetPoint + coolerBa)
       coolerHysteresis = MURUP;
     else if (newTemp <= thermalSetPoint - coolerBb)
       coolerHysteresis = MATI;
     statusBuffer[1] = coolerHysteresis;
   }
+
+  for (int i = 0; i < 30; i++)
+  {
+    if (progTrig[i] != 0)
+    {
+      bool condition;
+      if (progTrig[i] == 1 || progTrig[i] == 2)
+      {
+        float *copyValue = (float *)malloc(sizeof(float) * 2);
+        memcpy(&copyValue[0], &progRB2[i], sizeof(float));
+        copyValue[1] = (progTrig[i] == 1) ? newTemp : newHumid;
+
+        // We only care about first byte, because nilai suhu's or humidity's(operator) value is no more than 3
+        if (progRB1[i][0] == 0)
+          condition = (copyValue[1] < copyValue[0]);
+        else if (progRB1[i][0] == 1)
+          condition = (copyValue[1] > copyValue[0]);
+        else if (progRB1[i][0] == 2)
+          condition = (copyValue[1] <= copyValue[0]);
+        else if (progRB1[i][0] == 3)
+          condition = (copyValue[1] >= copyValue[0]);
+        if (condition)
+        {
+          if (progAct[i] == 1 || progAct[i] == 6)
+            statusBuffer[2] = (progAct[i] == 1) ? MURUP : MATI;
+          if (progAct[i] == 2 || progAct[i] == 7)
+            statusBuffer[3] = (progAct[i] == 2) ? MURUP : MATI;
+          if (progAct[i] == 3 || progAct[i] == 8)
+            statusBuffer[0] = (progAct[i] == 3) ? MURUP : MATI;
+          if (progAct[i] == 4 || progAct[i] == 9)
+            statusBuffer[1] = (progAct[i] == 4) ? MURUP : MATI;
+          if (progAct[i] == 5 || progAct[i] == 10)
+            statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
+        }
+        free(copyValue);
+      }
+      if (progTrig[i] == 3 || progTrig[i] == 4)
+      {
+        Serial.printf("Program %d JD/TGW Exist\n", i);
+        DateTime now = rtc.now();
+        bool condition;
+        unsigned long *uCopyValue = (unsigned long *)malloc(sizeof(unsigned long) * 3);
+        memcpy(&uCopyValue[0], &progRB1[i], sizeof(unsigned long));
+        memcpy(&uCopyValue[1], &progRB2[i], sizeof(unsigned long));
+        Serial.printf("uCopyValue[0](from) is %lu\nuCopyValue[1](to) is %lu\n", uCopyValue[0], uCopyValue[1]);
+        if (progTrig[i] == 4)
+        {
+          if (now.unixtime() >= uCopyValue[0])
+          {
+            condition = (now.unixtime() < uCopyValue[1]) ? true : false;
+            switch (progAct[i])
+            {
+            case 1:
+              statusBuffer[2] = (condition) ? MURUP : MATI;
+              break;
+            case 2:
+              statusBuffer[3] = (condition) ? MURUP : MATI;
+              break;
+            case 3:
+              statusBuffer[0] = (condition) ? MURUP : MATI;
+              break;
+            case 4:
+              statusBuffer[1] = (condition) ? MURUP : MATI;
+              break;
+            case 5:
+              statusBuffer[4] = (condition) ? MURUP : MATI;
+              break;
+            case 6:
+              statusBuffer[2] = (condition) ? MATI : MURUP;
+              break;
+            case 7:
+              statusBuffer[3] = (condition) ? MATI : MURUP;
+              break;
+            case 8:
+              statusBuffer[0] = (condition) ? MATI : MURUP;
+              break;
+            case 9:
+              statusBuffer[1] = (condition) ? MATI : MURUP;
+              break;
+            case 10:
+              statusBuffer[4] = (condition) ? MATI : MURUP;
+              break;
+            }
+          }
+          Serial.printf("unixtime : %lu\nTGW Condition %s\n", now.unixtime(), (condition) ? "true" : "false");
+        }
+        else if (progTrig[i] == 3)
+        {
+          uCopyValue[2] = (now.hour() * 3600) + (now.minute() * 60) + now.second();
+          condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
+          Serial.printf("jwtimeNow : %lu\nJW Condition %s\n", uCopyValue[2], (condition) ? "true" : "false");
+
+          switch (progAct[i])
+          {
+          case 1:
+            statusBuffer[2] = (condition) ? MURUP : MATI;
+            break;
+          case 2:
+            statusBuffer[3] = (condition) ? MURUP : MATI;
+            break;
+          case 3:
+            statusBuffer[0] = (condition) ? MURUP : MATI;
+            break;
+          case 4:
+            statusBuffer[1] = (condition) ? MURUP : MATI;
+            break;
+          case 5:
+            statusBuffer[4] = (condition) ? MURUP : MATI;
+            break;
+          case 6:
+            statusBuffer[2] = (condition) ? MATI : MURUP;
+            break;
+          case 7:
+            statusBuffer[3] = (condition) ? MATI : MURUP;
+            break;
+          case 8:
+            statusBuffer[0] = (condition) ? MATI : MURUP;
+            break;
+          case 9:
+            statusBuffer[1] = (condition) ? MATI : MURUP;
+            break;
+          case 10:
+            statusBuffer[4] = (condition) ? MATI : MURUP;
+            break;
+          }
+        }
+
+        Serial.printf("condition %s\nprogAct %d\n", (condition) ? "true" : "false", progAct[i]);
+        free(uCopyValue);
+      }
+    }
+  }
+
   bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
   bitWrite595(SFT_COOLER_RELAY, statusBuffer[1]);
   bitWrite595(SFT_AUX1_RELAY, statusBuffer[2]);
@@ -689,6 +807,7 @@ void programScan()
   bitWrite(deviceStatus, BITPOS_COOLER_STATUS, statusBuffer[1]);
   bitWrite(deviceStatus, BITPOS_AUX1_STATUS, statusBuffer[2]);
   bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[3]);
+  bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
   free(statusBuffer);
 }
 

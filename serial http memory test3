@@ -377,3 +377,5 @@ Heap : 47056
 HTPP Post
 Stack : 2544
 Heap : 47056
+
+          Serial.printf("timeNow : %lu\nJW Condition %s\n", uCopyValue[2], (condition) ? "true" : "false");
