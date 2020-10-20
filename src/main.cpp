@@ -175,7 +175,7 @@ void byteWrite595(const uint8_t data);
 void selectMux(byte channel);
 int readMux();
 void programScan();
-uint8_t uselessNumberParser(uint8_t progNum);
+uint8_t uselessNumberParser(uint8_t progAct);
 
 void setup(void)
 {
@@ -214,7 +214,7 @@ void setup(void)
 
   if (ds18b.getDS18Count() == 0)
   {
-    if (!bitReadFB(FD_DS_NF1))
+    if (!bitReadFB(FB_DS_NF1))
     {
       Serial.println("No DS18B20 FOUND!\nRestarting!");
       bitWrite(storedFirstByte, FB_DS_NF1, true);
@@ -776,18 +776,18 @@ void programScan()
 
             if (condition)
             {
-              if (uselessNumberParser(i) < 6)
-                statusBuffer[uselessNumberParser(i)] = MURUP;
-              else if (uselessNumberParser(i) >= 6)
-                statusBuffer[uselessNumberParser(i)] = MATI;
+              if (uselessNumberParser(progAct[i]) < 6)
+                statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
+              else if (uselessNumberParser(progAct[i]) >= 6)
+                statusBuffer[uselessNumberParser(progAct[i])] = MATI;
               progFlag[i] = true;
             }
             else if (progFlag[i])
             {
-              if (uselessNumberParser(i) < 6)
-                statusBuffer[uselessNumberParser(i)] = MATI;
-              else if (uselessNumberParser(i) >= 6)
-                statusBuffer[uselessNumberParser(i)] = MURUP;
+              if (uselessNumberParser(progAct[i]) < 6)
+                statusBuffer[uselessNumberParser(progAct[i])] = MATI;
+              else if (uselessNumberParser(progAct[i]) >= 6)
+                statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
               progFlag[i] = false;
             }
           }
@@ -798,18 +798,18 @@ void programScan()
           condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
           if (condition)
           {
-            if (uselessNumberParser(i) < 6)
-              statusBuffer[uselessNumberParser(i)] = MURUP;
-            else if (uselessNumberParser(i) >= 6)
-              statusBuffer[uselessNumberParser(i)] = MATI;
+            if (uselessNumberParser(progAct[i]) < 6)
+              statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
+            else if (uselessNumberParser(progAct[i]) >= 6)
+              statusBuffer[uselessNumberParser(progAct[i])] = MATI;
             progFlag[i] = true;
           }
           else if (progFlag[i])
           {
-            if (uselessNumberParser(i) < 6)
-              statusBuffer[uselessNumberParser(i)] = MATI;
-            else if (uselessNumberParser(i) >= 6)
-              statusBuffer[uselessNumberParser(i)] = MURUP;
+            if (uselessNumberParser(progAct[i]) < 6)
+              statusBuffer[uselessNumberParser(progAct[i])] = MATI;
+            else if (uselessNumberParser(progAct[i]) >= 6)
+              statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
             progFlag[i] = false;
           }
         }
@@ -820,15 +820,15 @@ void programScan()
         if (progRB2[i][0] != 0)
         {
           if (progRB1[i][0] == 1)
-            condition = (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+            condition = (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
           else if (progRB1[i][0] == 2)
-            condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+            condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
           else if (progRB1[i][0] == 3)
-            condition = (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+            condition = (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
           else if (progRB1[i][0] == 4)
-            condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+            condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
           else if (progRB1[i][0] == 5)
-            condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+            condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
           if (condition)
           {
             if (progAct[i] == 1 || progAct[i] == 6)
@@ -867,9 +867,9 @@ void programScan()
   free(statusBuffer);
 }
 
-uint8_t uselessNumberParser(uint8_t progNum)
+uint8_t uselessNumberParser(uint8_t progAct)
 {
-  switch (progNum)
+  switch (progAct)
   {
   case 1:
     return 2;
@@ -902,6 +902,7 @@ uint8_t uselessNumberParser(uint8_t progNum)
     return 4;
     break;
   }
+  return 0;
 }
 
 ////////////////////////////////////// IO API ///////////////////////////////////////////////////////
