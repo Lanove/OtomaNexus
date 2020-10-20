@@ -1,6 +1,6 @@
 /*
 Todo :
-- Add softSSID,softPW,softIPAddress at setting menu of otoma web
+DONE Add softSSID,softPW,softIPAddress at setting menu of otoma web
 DONE Check last update of ESP8266 on server to notify the user when the ESP8266 is not updating for more than 5 minute (because disconnect)
 CANCELLED Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
 - Add buzzer notification for WiFi fail connect, disconnect, time out.
@@ -16,7 +16,8 @@ DONE Do reload status just for read-only thing (like temp, humid)
 - Add timeout response for AJAX on web
 - Please remove that useless auto filter of pid/hys parameter input
 - Create our own parser for jadwal harian picker (fkin buggy)
-
+- Reload Status of web every 3 second, and create a flag that there are update from ESP, and web will fetch it and server will clear that flag.
+- Change the logic of plot graphing
 
 Idea : 
 - do something like this on automation program
@@ -138,6 +139,7 @@ byte progTrig[30];
 byte progRB1[30][4];
 byte progRB2[30][4];
 byte progAct[30];
+bool progFlag[30];
 
 void debugMemory(); // Function to check free stack and heap remaining
 void storeString(int addrOffset, const String &strToWrite);
@@ -147,7 +149,6 @@ void writeToEEPROM(byte what, const String &strToWrite);
 byte byteReadFB();
 void byteWriteFB(byte data);
 bool bitReadFB(byte docchi);
-void bitWriteFB(byte docchi, bool status);
 void loadAllPrograms();
 
 void loadInfo();
@@ -204,9 +205,52 @@ void setup(void)
     }
   }
   eeprom.initialize();
+  delay(100);
   ds18b.begin();
+  delay(100);
   dht.begin();
   loadInfo();
+
+  if (ds18b.getDS18Count() == 0)
+  {
+    if (!bitReadFB(FD_DS_NF1))
+    {
+      Serial.println("No DS18B20 FOUND!\nRestarting!");
+      bitWrite(storedFirstByte, FB_DS_NF1, true);
+      eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+      delay(10);
+      delay(500);
+      ESP.restart();
+    }
+    else if (!bitReadFB(FB_DS_NF2))
+    {
+      Serial.println("No DS18B20 FOUND!\nRestarting!");
+      bitWrite(storedFirstByte, FB_DS_NF2, true);
+      eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+      delay(10);
+      delay(500);
+      ESP.restart();
+    }
+    else
+    {
+      Serial.println("No DS18B20 FOUND!\nProgress without DS18B20!");
+      bitWrite(storedFirstByte, FB_DS_NF1, false);
+      bitWrite(storedFirstByte, FB_DS_NF2, false);
+      eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+      delay(10);
+    }
+  }
+  else
+  {
+    if (bitReadFB(FB_DS_NF1) || bitReadFB(FB_DS_NF2))
+    {
+      bitWrite(storedFirstByte, FB_DS_NF1, false);
+      bitWrite(storedFirstByte, FB_DS_NF2, false);
+      eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+      delay(10);
+    }
+  }
+
   loadAllPrograms();
   Serial.printf("Thermal Setpoint : %f\nHeater Mode : %s\nHeater Kp: %f\nHeater Ki: %f\nHeater Kd: %f\nHeater Ds: %f\nHeater Ba: %f\nHeater Bb: %f\nCooler Mode : %s\nCooler Kp: %f\nCooler Ki: %f\nCooler Kd: %f\nCooler Ds: %f\nCooler Ba: %f\nCooler Bb: %f\n", thermalSetPoint, (bitRead(htclMode, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb, (bitRead(htclMode, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
   Serial.printf("Thermocontroller Info\nTherco Operation : %s\nTherco Mode %s\n", (bitRead(deviceStatus, BITPOS_TC_OPERATION)) ? "AUTO" : "MANUAL", (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "HEATER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "COOLER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "DUAL" : "INVALID");
@@ -244,8 +288,13 @@ void setup(void)
     {
       if (initiateClient(storedSSID, storedWifiPass))
       {
-        bitWriteFB(FB_WIFI_ERROR1, false);
-        bitWriteFB(FB_WIFI_ERROR2, false);
+        if (bitReadFB(FB_WIFI_ERROR1) || bitReadFB(FB_WIFI_ERROR2))
+        {
+          bitWrite(storedFirstByte, FB_WIFI_ERROR1, false);
+          bitWrite(storedFirstByte, FB_WIFI_ERROR2, false);
+          eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+          delay(10);
+        }
         break;
       }
       timeOutCounter++;
@@ -256,7 +305,8 @@ void setup(void)
       if (!bitReadFB(FB_WIFI_ERROR1))
       {
         Serial.println("Rebooting attempt 1");
-        bitWriteFB(FB_WIFI_ERROR1, true);
+        bitWrite(storedFirstByte, FB_WIFI_ERROR1, true);
+        eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
         delay(500);
         ESP.restart();
       }
@@ -265,7 +315,8 @@ void setup(void)
         if (!bitReadFB(FB_WIFI_ERROR2))
         {
           Serial.println("Rebooting attempt 2");
-          bitWriteFB(FB_WIFI_ERROR2, true);
+          bitWrite(storedFirstByte, FB_WIFI_ERROR2, true);
+          eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
           delay(500);
           ESP.restart();
         }
@@ -273,9 +324,11 @@ void setup(void)
         {
           initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
           deployWebServer();
-          bitWriteFB(FB_CONNECTED, false);
-          bitWriteFB(FB_WIFI_ERROR1, false);
-          bitWriteFB(FB_WIFI_ERROR2, false);
+          bitWrite(storedFirstByte, FB_CONNECTED, false);
+          bitWrite(storedFirstByte, FB_WIFI_ERROR1, false);
+          bitWrite(storedFirstByte, FB_WIFI_ERROR2, false);
+          eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+          delay(10);
         }
       }
     }
@@ -364,7 +417,7 @@ void loop(void)
           if (timeClient.getEpochTime() > now.unixtime() + 10 || timeClient.getEpochTime() < now.unixtime() - 10)
             rtc.adjust(DateTime(timeClient.getEpochTime()));
         }
-        const size_t capacity = JSON_ARRAY_SIZE(7) + JSON_OBJECT_SIZE(4);
+        const size_t capacity = JSON_ARRAY_SIZE(3) + JSON_OBJECT_SIZE(9);
         DynamicJsonDocument doc(capacity);
         String json;
         // Type is splitted by 'n'
@@ -375,15 +428,16 @@ void loop(void)
         // so tnhns means ESP8266 is sending temperature and humidity
         doc[F("type")] = F("tnhns");
         doc[F("unix")] = now.unixtime();
-        JsonArray data = doc.createNestedArray("data");
+        doc[F("a1")] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
+        doc[F("a2")] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
+        doc[F("tc")] = bitRead(deviceStatus, BITPOS_TC_STATUS);
+        doc[F("ht")] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
+        doc[F("cl")] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
 
+        JsonArray data = doc.createNestedArray("data");
         data.add(newTemp);
-        data.add(newHumid);
-        data.add(bitRead(deviceStatus, BITPOS_AUX1_STATUS));
-        data.add(bitRead(deviceStatus, BITPOS_AUX2_STATUS));
-        data.add(bitRead(deviceStatus, BITPOS_TC_STATUS));
-        data.add(bitRead(deviceStatus, BITPOS_HEATER_STATUS));
-        data.add(bitRead(deviceStatus, BITPOS_COOLER_STATUS));
+        (!isnan(newHumid)) ? data.add(newHumid) : data.add(0.1);
+
         serializeJson(doc, json);
         int httpCode;
         String response;
@@ -553,7 +607,9 @@ void loop(void)
             }
             if (response == "forget")
             {
-              bitWriteFB(FB_CONNECTED, false);
+              bitWrite(storedFirstByte, FB_CONNECTED, false);
+              eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+              delay(10);
               delay(500);
               ESP.reset();
             }
@@ -579,7 +635,9 @@ void loop(void)
   {
     writeToEEPROM(WIFISSID, "GAGAL KONEKSI");
     writeToEEPROM(WIFIPW, " ");
-    bitWriteFB(FB_CONNECTED, false);
+    bitWrite(storedFirstByte, FB_CONNECTED, false);
+    eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+    delay(10);
     delay(500);
     ESP.reset();
   }
@@ -600,11 +658,18 @@ void programScan()
   statusBuffer[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
   statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
   statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
-  if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-      bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID &&
-      bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
+  statusBuffer[4] = bitRead(deviceStatus, BITPOS_TC_STATUS);
+  bool hcon =
       ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
+       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1));
+  bool ccon =
+      ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
+       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1));
+  bool tcactive =
+      (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
+       bitRead(deviceStatus, BITPOS_TC_STATUS) == true);
+
+  if (tcactive && bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID && hcon)
   {
     if (heaterPID.GetMode() == MANUAL)
       heaterPID.SetMode(AUTOMATIC);
@@ -619,11 +684,7 @@ void programScan()
     else
       statusBuffer[0] = MURUP;
   }
-  else if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-           bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_HYSTERESIS &&
-           bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
-           ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-            (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
+  else if (tcactive && bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_HYSTERESIS && hcon)
   { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
     if (heaterPID.GetMode() == AUTOMATIC)
       heaterPID.SetMode(MANUAL);
@@ -633,11 +694,8 @@ void programScan()
       heaterHysteresis = MURUP;
     statusBuffer[0] = heaterHysteresis;
   }
-  if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-      bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID &&
-      bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
-      ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
+
+  if (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID && tcactive && ccon)
   {
     if (coolerPID.GetMode() == MANUAL)
       coolerPID.SetMode(AUTOMATIC);
@@ -652,11 +710,7 @@ void programScan()
     else
       statusBuffer[1] = MURUP;
   }
-  else if (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-           bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_HYSTERESIS &&
-           bitRead(deviceStatus, BITPOS_TC_STATUS) == true &&
-           ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-            (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1)))
+  else if (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_HYSTERESIS && tcactive && ccon)
   { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
     if (coolerPID.GetMode() == AUTOMATIC)
       coolerPID.SetMode(MANUAL);
@@ -687,6 +741,8 @@ void programScan()
           condition = (copyValue[1] <= copyValue[0]);
         else if (progRB1[i][0] == 3)
           condition = (copyValue[1] >= copyValue[0]);
+        else
+          condition = false;
         if (condition)
         {
           if (progAct[i] == 1 || progAct[i] == 6)
@@ -704,13 +760,11 @@ void programScan()
       }
       if (progTrig[i] == 3 || progTrig[i] == 4)
       {
-        Serial.printf("Program %d JD/TGW Exist\n", i);
         DateTime now = rtc.now();
         bool condition;
         unsigned long *uCopyValue = (unsigned long *)malloc(sizeof(unsigned long) * 3);
         memcpy(&uCopyValue[0], &progRB1[i], sizeof(unsigned long));
         memcpy(&uCopyValue[1], &progRB2[i], sizeof(unsigned long));
-        Serial.printf("uCopyValue[0](from) is %lu\nuCopyValue[1](to) is %lu\n", uCopyValue[0], uCopyValue[1]);
         if (progTrig[i] == 4)
         {
           if (now.unixtime() >= uCopyValue[0])
@@ -750,14 +804,11 @@ void programScan()
               break;
             }
           }
-          Serial.printf("unixtime : %lu\nTGW Condition %s\n", now.unixtime(), (condition) ? "true" : "false");
         }
         else if (progTrig[i] == 3)
         {
           uCopyValue[2] = (now.hour() * 3600) + (now.minute() * 60) + now.second();
           condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
-          Serial.printf("jwtimeNow : %lu\nJW Condition %s\n", uCopyValue[2], (condition) ? "true" : "false");
-
           switch (progAct[i])
           {
           case 1:
@@ -792,15 +843,20 @@ void programScan()
             break;
           }
         }
-
-        Serial.printf("condition %s\nprogAct %d\n", (condition) ? "true" : "false", progAct[i]);
         free(uCopyValue);
       }
     }
   }
-
-  bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
-  bitWrite595(SFT_COOLER_RELAY, statusBuffer[1]);
+  if (bitRead(deviceStatus, BITPOS_TC_STATUS))
+  {
+    bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
+    bitWrite595(SFT_COOLER_RELAY, statusBuffer[1]);
+  }
+  else
+  {
+    bitWrite595(SFT_HEATER_RELAY, MATI);
+    bitWrite595(SFT_COOLER_RELAY, MATI);
+  }
   bitWrite595(SFT_AUX1_RELAY, statusBuffer[2]);
   bitWrite595(SFT_AUX2_RELAY, statusBuffer[3]);
   bitWrite(deviceStatus, BITPOS_HEATER_STATUS, statusBuffer[0]);
@@ -907,15 +963,6 @@ void byteWriteFB(byte data)
 bool bitReadFB(byte docchi)
 {
   return ((storedFirstByte >> docchi) & 0x01);
-}
-
-void bitWriteFB(byte docchi, bool status)
-{
-  if (status)
-    storedFirstByte |= (1 << docchi);
-  else
-    storedFirstByte &= ~(1 << docchi);
-  byteWriteFB(storedFirstByte);
 }
 
 const String readFromEEPROM(byte what)
@@ -1089,6 +1136,8 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
   http.begin(client, URL); //HTTP
   http.addHeader(F("Content-Type"), F("application/json"));
   http.addHeader(F("Device-Token"), storedDeviceToken);
+  http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
+  http.addHeader(F("ESP8266-MAC"), WiFi.macAddress().c_str());
   // start connection and send HTTP header and body
   int httpCode = http.POST(data);
   responseCode = httpCode;
@@ -1257,13 +1306,15 @@ void pgAccInfo()
     // Initiate HTTP Request to identifyDevice.php
     Serial.print("[HTTP] begin...\n");
     int httpCode;
-    StaticJsonDocument<350> doc;
+    DynamicJsonDocument doc(500);
     String json;
     doc[F("username")] = usrn.c_str();
     doc[F("password")] = unpw.c_str();
     doc[F("devicetoken")] = storedDeviceToken.c_str();
     doc[F("softssid")] = storedSoftSSID.c_str();
     doc[F("softpw")] = storedSoftWifiPass.c_str();
+    doc[F("mac")] = WiFi.macAddress().c_str();
+    doc[F("semver")] = BUILD_VERSION;
     serializeJson(doc, json);
     Serial.printf("JSON Size : %d\n", doc.memoryUsage());
     Serial.printf("Transferred JSON : %s\n", json.c_str());
@@ -1275,7 +1326,9 @@ void pgAccInfo()
       {
         writeToEEPROM(USERNAME, usrn);
         writeToEEPROM(USERPASS, unpw);
-        bitWriteFB(FB_CONNECTED, true);
+        bitWrite(storedFirstByte, FB_CONNECTED, true);
+        eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+        delay(10);
       }
     }
     else
@@ -1289,7 +1342,9 @@ void pgAccInfo()
         if (responseStatus == "success" || responseStatus == "recon")
         {
           writeToEEPROM(USERNAME, usrn);
-          bitWriteFB(FB_CONNECTED, true);
+          bitWrite(storedFirstByte, FB_CONNECTED, true);
+          eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+          delay(10);
         }
       }
       else // It failed once again, probably the WiFi is offline or server is offline, let's report

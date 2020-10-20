@@ -1,3 +1,5 @@
+#define BUILD_VERSION "1.0.0"
+
 #define EEPROM_ADDRESS 0x50
 
 #define MURUP 1 // BEN GA BINGUNG, FOR SOME REASON, INVERTING OUTPUT CAUSES OSCILLATING
@@ -17,6 +19,8 @@
 #define FB_CONNECTED 0
 #define FB_WIFI_ERROR1 1
 #define FB_WIFI_ERROR2 2
+#define FB_DS_NF1 3
+#define FB_DS_NF2 4
 
 #define DHTPIN 13
 #define DHTTYPE DHT11
@@ -41,6 +45,8 @@
 #define SENSOR_DELAY 1000
 #define DHT_LOOP 5                     // Means that DHT will sample once every 5 sample of DS18B20
 #define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
+
+#define ADDR_FIRST_BYTE 0
 
 // address 602 is 362
 #define PROG_LENGTH 366
