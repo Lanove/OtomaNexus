@@ -175,6 +175,7 @@ void byteWrite595(const uint8_t data);
 void selectMux(byte channel);
 int readMux();
 void programScan();
+uint8_t uselessNumberParser(uint8_t progNum);
 
 void setup(void)
 {
@@ -743,6 +744,7 @@ void programScan()
           condition = (copyValue[1] >= copyValue[0]);
         else
           condition = false;
+
         if (condition)
         {
           if (progAct[i] == 1 || progAct[i] == 6)
@@ -756,6 +758,7 @@ void programScan()
           if (progAct[i] == 5 || progAct[i] == 10)
             statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
         }
+
         free(copyValue);
       }
       if (progTrig[i] == 3 || progTrig[i] == 4)
@@ -770,38 +773,22 @@ void programScan()
           if (now.unixtime() >= uCopyValue[0])
           {
             condition = (now.unixtime() < uCopyValue[1]) ? true : false;
-            switch (progAct[i])
+
+            if (condition)
             {
-            case 1:
-              statusBuffer[2] = (condition) ? MURUP : MATI;
-              break;
-            case 2:
-              statusBuffer[3] = (condition) ? MURUP : MATI;
-              break;
-            case 3:
-              statusBuffer[0] = (condition) ? MURUP : MATI;
-              break;
-            case 4:
-              statusBuffer[1] = (condition) ? MURUP : MATI;
-              break;
-            case 5:
-              statusBuffer[4] = (condition) ? MURUP : MATI;
-              break;
-            case 6:
-              statusBuffer[2] = (condition) ? MATI : MURUP;
-              break;
-            case 7:
-              statusBuffer[3] = (condition) ? MATI : MURUP;
-              break;
-            case 8:
-              statusBuffer[0] = (condition) ? MATI : MURUP;
-              break;
-            case 9:
-              statusBuffer[1] = (condition) ? MATI : MURUP;
-              break;
-            case 10:
-              statusBuffer[4] = (condition) ? MATI : MURUP;
-              break;
+              if (uselessNumberParser(i) < 6)
+                statusBuffer[uselessNumberParser(i)] = MURUP;
+              else if (uselessNumberParser(i) >= 6)
+                statusBuffer[uselessNumberParser(i)] = MATI;
+              progFlag[i] = true;
+            }
+            else if (progFlag[i])
+            {
+              if (uselessNumberParser(i) < 6)
+                statusBuffer[uselessNumberParser(i)] = MATI;
+              else if (uselessNumberParser(i) >= 6)
+                statusBuffer[uselessNumberParser(i)] = MURUP;
+              progFlag[i] = false;
             }
           }
         }
@@ -809,44 +796,57 @@ void programScan()
         {
           uCopyValue[2] = (now.hour() * 3600) + (now.minute() * 60) + now.second();
           condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
-          switch (progAct[i])
+          if (condition)
           {
-          case 1:
-            statusBuffer[2] = (condition) ? MURUP : MATI;
-            break;
-          case 2:
-            statusBuffer[3] = (condition) ? MURUP : MATI;
-            break;
-          case 3:
-            statusBuffer[0] = (condition) ? MURUP : MATI;
-            break;
-          case 4:
-            statusBuffer[1] = (condition) ? MURUP : MATI;
-            break;
-          case 5:
-            statusBuffer[4] = (condition) ? MURUP : MATI;
-            break;
-          case 6:
-            statusBuffer[2] = (condition) ? MATI : MURUP;
-            break;
-          case 7:
-            statusBuffer[3] = (condition) ? MATI : MURUP;
-            break;
-          case 8:
-            statusBuffer[0] = (condition) ? MATI : MURUP;
-            break;
-          case 9:
-            statusBuffer[1] = (condition) ? MATI : MURUP;
-            break;
-          case 10:
-            statusBuffer[4] = (condition) ? MATI : MURUP;
-            break;
+            if (uselessNumberParser(i) < 6)
+              statusBuffer[uselessNumberParser(i)] = MURUP;
+            else if (uselessNumberParser(i) >= 6)
+              statusBuffer[uselessNumberParser(i)] = MATI;
+            progFlag[i] = true;
+          }
+          else if (progFlag[i])
+          {
+            if (uselessNumberParser(i) < 6)
+              statusBuffer[uselessNumberParser(i)] = MATI;
+            else if (uselessNumberParser(i) >= 6)
+              statusBuffer[uselessNumberParser(i)] = MURUP;
+            progFlag[i] = false;
           }
         }
         free(uCopyValue);
       }
+      if (progTrig[i] == 5 && progRB2[i][0] != 0)
+      {
+        if (progRB2[i][0] != 0)
+        {
+          if (progRB1[i][0] == 1)
+            condition = (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+          else if (progRB1[i][0] == 2)
+            condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+          else if (progRB1[i][0] == 3)
+            condition = (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+          else if (progRB1[i][0] == 4)
+            condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+          else if (progRB1[i][0] == 5)
+            condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == (progRB2[i] == 1) ? MURUP : MATI);
+          if (condition)
+          {
+            if (progAct[i] == 1 || progAct[i] == 6)
+              statusBuffer[2] = (progAct[i] == 1) ? MURUP : MATI;
+            if (progAct[i] == 2 || progAct[i] == 7)
+              statusBuffer[3] = (progAct[i] == 2) ? MURUP : MATI;
+            if (progAct[i] == 3 || progAct[i] == 8)
+              statusBuffer[0] = (progAct[i] == 3) ? MURUP : MATI;
+            if (progAct[i] == 4 || progAct[i] == 9)
+              statusBuffer[1] = (progAct[i] == 4) ? MURUP : MATI;
+            if (progAct[i] == 5 || progAct[i] == 10)
+              statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
+          }
+        }
+      }
     }
   }
+
   if (bitRead(deviceStatus, BITPOS_TC_STATUS))
   {
     bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
@@ -865,6 +865,43 @@ void programScan()
   bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[3]);
   bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
   free(statusBuffer);
+}
+
+uint8_t uselessNumberParser(uint8_t progNum)
+{
+  switch (progNum)
+  {
+  case 1:
+    return 2;
+    break;
+  case 2:
+    return 3;
+    break;
+  case 3:
+    return 0;
+    break;
+  case 4:
+    return 1;
+    break;
+  case 5:
+    return 4;
+    break;
+  case 6:
+    return 2;
+    break;
+  case 7:
+    return 3;
+    break;
+  case 8:
+    return 0;
+    break;
+  case 9:
+    return 1;
+    break;
+  case 10:
+    return 4;
+    break;
+  }
 }
 
 ////////////////////////////////////// IO API ///////////////////////////////////////////////////////
