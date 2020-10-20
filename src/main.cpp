@@ -16,8 +16,10 @@ DONE Do reload status just for read-only thing (like temp, humid)
 - Add timeout response for AJAX on web
 - Please remove that useless auto filter of pid/hys parameter input
 - Create our own parser for jadwal harian picker (fkin buggy)
-- Reload Status of web every 3 second, and create a flag that there are update from ESP, and web will fetch it and server will clear that flag.
+DONE Reload Status of web every 3 second, and create a flag that there are update from ESP, and web will fetch it and server will clear that flag.
 - Change the logic of plot graphing
+- Add stop/pause for automation program, if paused controller will ignore it. 
+- Add PID output status on web
 
 Idea : 
 - do something like this on automation program
@@ -361,7 +363,7 @@ void setup(void)
     }
   }
 
-  programScanner.attach(0.05, programScan);
+  programScanner.attach(2, programScan);
   debugMemory();
 }
 
@@ -726,6 +728,7 @@ void programScan()
   {
     if (progTrig[i] != 0)
     {
+      Serial.printf("progNum %d (+1) is Exist!\n", i + 1);
       bool condition;
       if (progTrig[i] == 1 || progTrig[i] == 2)
       {
@@ -770,25 +773,27 @@ void programScan()
         memcpy(&uCopyValue[1], &progRB2[i], sizeof(unsigned long));
         if (progTrig[i] == 4)
         {
+          Serial.printf("It was Tgw\n");
           if (now.unixtime() >= uCopyValue[0])
           {
             condition = (now.unixtime() < uCopyValue[1]) ? true : false;
-
             if (condition)
             {
-              if (uselessNumberParser(progAct[i]) < 6)
+              if (progAct[i] < 6)
                 statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
-              else if (uselessNumberParser(progAct[i]) >= 6)
+              else if (progAct[i] >= 6)
                 statusBuffer[uselessNumberParser(progAct[i])] = MATI;
               progFlag[i] = true;
+              Serial.printf("Forcing Action to %s", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
             }
             else if (progFlag[i])
             {
-              if (uselessNumberParser(progAct[i]) < 6)
+              if (progAct[i] < 6)
                 statusBuffer[uselessNumberParser(progAct[i])] = MATI;
-              else if (uselessNumberParser(progAct[i]) >= 6)
+              else if (progAct[i] >= 6)
                 statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
               progFlag[i] = false;
+              Serial.printf("Flipping Action to %s", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
             }
           }
         }
@@ -796,21 +801,24 @@ void programScan()
         {
           uCopyValue[2] = (now.hour() * 3600) + (now.minute() * 60) + now.second();
           condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
+          Serial.printf("It was Jadwal\n");
           if (condition)
           {
-            if (uselessNumberParser(progAct[i]) < 6)
+            if (progAct[i] < 6)
               statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
-            else if (uselessNumberParser(progAct[i]) >= 6)
+            else if (progAct[i] >= 6)
               statusBuffer[uselessNumberParser(progAct[i])] = MATI;
             progFlag[i] = true;
+            Serial.printf("Forcing Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
           }
           else if (progFlag[i])
           {
-            if (uselessNumberParser(progAct[i]) < 6)
+            if (progAct[i] < 6)
               statusBuffer[uselessNumberParser(progAct[i])] = MATI;
-            else if (uselessNumberParser(progAct[i]) >= 6)
+            else if (progAct[i] >= 6)
               statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
             progFlag[i] = false;
+            Serial.printf("Flipping Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
           }
         }
         free(uCopyValue);
@@ -844,6 +852,7 @@ void programScan()
           }
         }
       }
+      Serial.printf("Condition of statusBuffer[%d] is %s\n", uselessNumberParser(progAct[i]), (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
     }
   }
 
