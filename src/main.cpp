@@ -294,10 +294,7 @@ void setup(void)
   newHumid = dht.readHumidity();
 
   heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
-  heaterPID.SetOutputLimits(0, heaterDs);
-
   coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
-  coolerPID.SetOutputLimits(0, coolerDs);
 
   byteWrite595(0x00);
   ITimer.attachInterruptInterval(100000, programScan);
@@ -579,6 +576,7 @@ void loop(void)
                   bitWrite(htclMode, BITPOS_HEATER_MODE, out["hmd"].as<bool>());
                   eeprom.writeByte(ADDR_HTCL_MODE, htclMode);
                   delay(10);
+                  heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
                   Serial.printf("Received Heater Param Update!\nhHeater Mode : %s\nheaterKp : %f\nheaterKi : %f\nheaterKd : %f\nheaterDs : %f\nheaterBa : %f\nheaterBb : %f\n", (bitRead(htclMode, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb);
                 }
                 if (out["cpam"])
@@ -610,6 +608,7 @@ void loop(void)
                   Serial.println(out["cmd"].as<bool>());
                   bitWrite(htclMode, BITPOS_COOLER_MODE, out["cmd"].as<bool>());
                   eeprom.writeByte(ADDR_HTCL_MODE, htclMode);
+                  coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
                   delay(10);
                   // writeByte mode
                   Serial.printf("Received Cooler Param Update!\nCooler Mode : %s\ncoolerKp : %f\ncoolerKi : %f\ncoolerKd : %f\ncoolerDs : %f\ncoolerBa : %f\ncoolerBb : %f\n", (bitRead(htclMode, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
@@ -675,6 +674,7 @@ void loop(void)
                   }
                   free(num);
                 }
+
                 free(buffer);
               }
             }
@@ -801,10 +801,13 @@ void ICACHE_RAM_ATTR programScan(void)
       heaterPID.Compute();
       if (millis() - heaterWindowStart > (unsigned long)heaterDs)
       {
+        Serial.println("heaterShift");
         //time to shift the Relay Window
         heaterWindowStart += (unsigned long)heaterDs;
       }
-      if ((unsigned long)heaterPidOutput < millis() - heaterWindowStart)
+      if (heaterPidOutput == 0)
+        heaterPidOutput = 0.01;
+      if ((unsigned long)((heaterPidOutput * (heaterDs / 255.0)) < millis() - heaterWindowStart))
         statusBuffer[0] = MATI;
       else
         statusBuffer[0] = MURUP;
@@ -827,10 +830,13 @@ void ICACHE_RAM_ATTR programScan(void)
       coolerPID.Compute();
       if (millis() - coolerWindowStart > (unsigned long)coolerDs)
       {
+        Serial.println("coolerShift");
         //time to shift the Relay Window
         coolerWindowStart += (unsigned long)coolerDs;
       }
-      if ((unsigned long)coolerPidOutput < millis() - coolerWindowStart)
+      if (coolerPidOutput == 0)
+        coolerPidOutput = 0.01;
+      if ((unsigned long)(coolerPidOutput * (coolerDs / 255.0) < millis() - coolerWindowStart))
         statusBuffer[1] = MATI;
       else
         statusBuffer[1] = MURUP;
