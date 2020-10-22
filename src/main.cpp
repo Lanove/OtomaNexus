@@ -10,16 +10,18 @@ POSTPONED Create Analog Input API -- done part
 DONE Remove != and == from comparator list
 DONE Lol, the name is operator, not comparator. to be exact, it was relational operators
 - Lk sempet add OTA Web Server HTTP Update
-- Fix parse input on web automation program
+DONE Fix parse input on web automation program
 - Optimize stack usage by moving memory usage to heap with malloc/free/calloc
 DONE Do reload status just for read-only thing (like temp, humid)
 - Add timeout response for AJAX on web
-- Please remove that useless auto filter of pid/hys parameter input
+DONE Please remove that useless auto filter of pid/hys parameter input
 - Create our own parser for jadwal harian picker (fkin buggy)
 DONE Reload Status of web every 3 second, and create a flag that there are update from ESP, and web will fetch it and server will clear that flag.
 - Change the logic of plot graphing
 - Add stop/pause for automation program, if paused controller will ignore it. 
 - Add PID output status on web
+DONE Add timeout feature
+- Improve update fetch algorithm
 
 Idea : 
 - do something like this on automation program
@@ -62,9 +64,9 @@ Keterangan Pin :
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <time.h>
-#include <Ticker.h>
 #include <constants.h>
 #include <PID_v1.h>
+#include <ESP8266TimerInterrupt.h>
 
 #include <ArduinoJson.h>
 #include <Wire.h>
@@ -74,6 +76,43 @@ Keterangan Pin :
 #include <ShiftRegister74HC595.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <Blinker.h>
+
+void debugMemory(); // Function to check free stack and heap remaining
+void storeString(int addrOffset, const String &strToWrite);
+byte *readString(int addrOffset);
+const String readFromEEPROM(byte what);
+void writeToEEPROM(byte what, const String &strToWrite);
+byte byteReadFB();
+void byteWriteFB(byte data);
+bool bitReadFB(byte docchi);
+void loadAllPrograms();
+
+void loadInfo();
+bool initiateSoftAP();
+bool initiateClient(const String &ssid, const String &pass);
+void deployWebServer();
+void closeServer();
+bool closeSoftAP();
+bool closeClient();
+bool isWifiConnected();
+void fetchURL(const String &URL, const String &payload, int &responseCode, String &response);
+void writeByteEEPROM(int addr, byte data);
+void pgRoot(); // function prototypes for HTTP handlers
+void pgInit();
+void pgRestart();
+void pgReqStatus();
+void pgAccInfo();
+void handleNotFound();
+void toggle595Bit(byte docchi);
+void bitWrite595(uint8_t docchi, uint8_t status);
+byte byteRead595();
+bool bitRead595(byte docchi);
+void byteWrite595(const uint8_t data);
+void selectMux(byte channel);
+int readMux();
+uint8_t uselessNumberParser(uint8_t progAct);
+void ICACHE_RAM_ATTR programScan(void);
 
 HTTPClient http;
 WiFiClient client;
@@ -86,7 +125,12 @@ DHT dht(DHTPIN, DHTTYPE);
 ShiftRegister74HC595<1> sr(DATA595, CLOCK595, LATCH595);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature ds18b(&oneWire);
-Ticker programScanner;
+ESP8266Timer ITimer;
+Blinker statusLED(SFT_LED_STATUS, &bitWrite595);
+Blinker statusBuzzer(SFT_BUZZER, &bitWrite595);
+
+bool programStarted = false;
+bool blinkerStarted = false;
 
 String storedUsername;
 String storedSSID;
@@ -143,48 +187,13 @@ byte progRB2[30][4];
 byte progAct[30];
 bool progFlag[30];
 
-void debugMemory(); // Function to check free stack and heap remaining
-void storeString(int addrOffset, const String &strToWrite);
-byte *readString(int addrOffset);
-const String readFromEEPROM(byte what);
-void writeToEEPROM(byte what, const String &strToWrite);
-byte byteReadFB();
-void byteWriteFB(byte data);
-bool bitReadFB(byte docchi);
-void loadAllPrograms();
-
-void loadInfo();
-bool initiateSoftAP();
-bool initiateClient(const String &ssid, const String &pass);
-void deployWebServer();
-void closeServer();
-bool closeSoftAP();
-bool closeClient();
-bool isWifiConnected();
-void fetchURL(const String &URL, const String &payload, int &responseCode, String &response);
-void writeByteEEPROM(int addr, byte data);
-void pgRoot(); // function prototypes for HTTP handlers
-void pgInit();
-void pgRestart();
-void pgReqStatus();
-void pgAccInfo();
-void handleNotFound();
-void toggle595Bit(byte docchi);
-void bitWrite595(byte docchi, bool status);
-byte byteRead595();
-bool bitRead595(byte docchi);
-void byteWrite595(const uint8_t data);
-void selectMux(byte channel);
-int readMux();
-void programScan();
-uint8_t uselessNumberParser(uint8_t progAct);
-
 void setup(void)
 {
   Serial.begin(74880); // Start the Serial communication to send messages to the computer
 
   Serial.println("Init");
-  debugMemory();
+  ESP.resetFreeContStack();
+  uint32_t freeStackStart = ESP.getFreeContStack();
   storedUsername.reserve(32);
   storedUserpass.reserve(64);
   storedSSID.reserve(32);
@@ -275,6 +284,7 @@ void setup(void)
   coolerPID.SetOutputLimits(0, coolerDs);
 
   byteWrite595(0x00);
+  ITimer.attachInterruptInterval(100000, programScan);
   closeClient();
   closeSoftAP();
   closeServer();
@@ -363,8 +373,11 @@ void setup(void)
     }
   }
 
-  programScanner.attach(2, programScan);
-  debugMemory();
+  statusBuzzer.setInterval(100);
+  statusBuzzer.disableAfter(300);
+  programStarted = true;
+  uint32_t freeStackEnd = ESP.getFreeContStack();
+  Serial.printf("\nCONT stack used at start: %d\n-------\n\n", freeStackStart - freeStackEnd);
 }
 
 void loop(void)
@@ -413,6 +426,8 @@ void loop(void)
     {
       if (millis() - requestMillis >= REQUEST_DELAY)
       {
+        ESP.resetFreeContStack();
+        uint32_t freeStackStart = ESP.getFreeContStack();
         DateTime now = rtc.now();
         if (timeClient.update())
         {
@@ -624,8 +639,10 @@ void loop(void)
           disconnectStamp = millis();
         }
 
-        debugMemory();
         requestMillis = millis();
+        debugMemory();
+        uint32_t freeStackEnd = ESP.getFreeContStack();
+        Serial.printf("\nCONT stack used at main fetch url: %d\n-------\n\n", freeStackStart - freeStackEnd);
       }
     }
     else
@@ -649,231 +666,6 @@ void loop(void)
 void debugMemory()
 {
   Serial.printf("Stack : %d\nHeap : %d\n", ESP.getFreeContStack(), ESP.getFreeHeap());
-}
-
-void programScan()
-{
-  bool *statusBuffer;
-  // 0 is heater, 1 is cooler, 2 is aux1, 3 is aux2
-  statusBuffer = (bool *)malloc(10);
-  // The algorithm that set PID Mode is just straight, the ifs is not there
-  statusBuffer[0] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
-  statusBuffer[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
-  statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
-  statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
-  statusBuffer[4] = bitRead(deviceStatus, BITPOS_TC_STATUS);
-  bool hcon =
-      ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1));
-  bool ccon =
-      ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-       (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1));
-  bool tcactive =
-      (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-       bitRead(deviceStatus, BITPOS_TC_STATUS) == true);
-
-  if (tcactive && bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID && hcon)
-  {
-    if (heaterPID.GetMode() == MANUAL)
-      heaterPID.SetMode(AUTOMATIC);
-    heaterPID.Compute();
-    if (millis() - heaterWindowStart > (unsigned long)heaterDs)
-    {
-      //time to shift the Relay Window
-      heaterWindowStart += (unsigned long)heaterDs;
-    }
-    if ((unsigned long)heaterPidOutput < millis() - heaterWindowStart)
-      statusBuffer[0] = MATI;
-    else
-      statusBuffer[0] = MURUP;
-  }
-  else if (tcactive && bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_HYSTERESIS && hcon)
-  { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
-    if (heaterPID.GetMode() == AUTOMATIC)
-      heaterPID.SetMode(MANUAL);
-    if (newTemp >= thermalSetPoint + heaterBa)
-      heaterHysteresis = MATI;
-    else if (newTemp <= thermalSetPoint - heaterBb)
-      heaterHysteresis = MURUP;
-    statusBuffer[0] = heaterHysteresis;
-  }
-
-  if (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID && tcactive && ccon)
-  {
-    if (coolerPID.GetMode() == MANUAL)
-      coolerPID.SetMode(AUTOMATIC);
-    coolerPID.Compute();
-    if (millis() - coolerWindowStart > (unsigned long)coolerDs)
-    {
-      //time to shift the Relay Window
-      coolerWindowStart += (unsigned long)coolerDs;
-    }
-    if ((unsigned long)coolerPidOutput < millis() - coolerWindowStart)
-      statusBuffer[1] = MATI;
-    else
-      statusBuffer[1] = MURUP;
-  }
-  else if (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_HYSTERESIS && tcactive && ccon)
-  { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
-    if (coolerPID.GetMode() == AUTOMATIC)
-      coolerPID.SetMode(MANUAL);
-    if (newTemp >= thermalSetPoint + coolerBa)
-      coolerHysteresis = MURUP;
-    else if (newTemp <= thermalSetPoint - coolerBb)
-      coolerHysteresis = MATI;
-    statusBuffer[1] = coolerHysteresis;
-  }
-
-  for (int i = 0; i < 30; i++)
-  {
-    if (progTrig[i] != 0)
-    {
-      Serial.printf("progNum %d (+1) is Exist!\n", i + 1);
-      bool condition;
-      if (progTrig[i] == 1 || progTrig[i] == 2)
-      {
-        float *copyValue = (float *)malloc(sizeof(float) * 2);
-        memcpy(&copyValue[0], &progRB2[i], sizeof(float));
-        copyValue[1] = (progTrig[i] == 1) ? newTemp : newHumid;
-
-        // We only care about first byte, because nilai suhu's or humidity's(operator) value is no more than 3
-        if (progRB1[i][0] == 0)
-          condition = (copyValue[1] < copyValue[0]);
-        else if (progRB1[i][0] == 1)
-          condition = (copyValue[1] > copyValue[0]);
-        else if (progRB1[i][0] == 2)
-          condition = (copyValue[1] <= copyValue[0]);
-        else if (progRB1[i][0] == 3)
-          condition = (copyValue[1] >= copyValue[0]);
-        else
-          condition = false;
-
-        if (condition)
-        {
-          if (progAct[i] == 1 || progAct[i] == 6)
-            statusBuffer[2] = (progAct[i] == 1) ? MURUP : MATI;
-          if (progAct[i] == 2 || progAct[i] == 7)
-            statusBuffer[3] = (progAct[i] == 2) ? MURUP : MATI;
-          if (progAct[i] == 3 || progAct[i] == 8)
-            statusBuffer[0] = (progAct[i] == 3) ? MURUP : MATI;
-          if (progAct[i] == 4 || progAct[i] == 9)
-            statusBuffer[1] = (progAct[i] == 4) ? MURUP : MATI;
-          if (progAct[i] == 5 || progAct[i] == 10)
-            statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
-        }
-
-        free(copyValue);
-      }
-      if (progTrig[i] == 3 || progTrig[i] == 4)
-      {
-        DateTime now = rtc.now();
-        bool condition;
-        unsigned long *uCopyValue = (unsigned long *)malloc(sizeof(unsigned long) * 3);
-        memcpy(&uCopyValue[0], &progRB1[i], sizeof(unsigned long));
-        memcpy(&uCopyValue[1], &progRB2[i], sizeof(unsigned long));
-        if (progTrig[i] == 4)
-        {
-          Serial.printf("It was Tgw\n");
-          if (now.unixtime() >= uCopyValue[0])
-          {
-            condition = (now.unixtime() < uCopyValue[1]) ? true : false;
-            if (condition)
-            {
-              if (progAct[i] < 6)
-                statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
-              else if (progAct[i] >= 6)
-                statusBuffer[uselessNumberParser(progAct[i])] = MATI;
-              progFlag[i] = true;
-              Serial.printf("Forcing Action to %s", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
-            }
-            else if (progFlag[i])
-            {
-              if (progAct[i] < 6)
-                statusBuffer[uselessNumberParser(progAct[i])] = MATI;
-              else if (progAct[i] >= 6)
-                statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
-              progFlag[i] = false;
-              Serial.printf("Flipping Action to %s", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
-            }
-          }
-        }
-        else if (progTrig[i] == 3)
-        {
-          uCopyValue[2] = (now.hour() * 3600) + (now.minute() * 60) + now.second();
-          condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
-          Serial.printf("It was Jadwal\n");
-          if (condition)
-          {
-            if (progAct[i] < 6)
-              statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
-            else if (progAct[i] >= 6)
-              statusBuffer[uselessNumberParser(progAct[i])] = MATI;
-            progFlag[i] = true;
-            Serial.printf("Forcing Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
-          }
-          else if (progFlag[i])
-          {
-            if (progAct[i] < 6)
-              statusBuffer[uselessNumberParser(progAct[i])] = MATI;
-            else if (progAct[i] >= 6)
-              statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
-            progFlag[i] = false;
-            Serial.printf("Flipping Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
-          }
-        }
-        free(uCopyValue);
-      }
-      if (progTrig[i] == 5 && progRB2[i][0] != 0)
-      {
-        if (progRB2[i][0] != 0)
-        {
-          if (progRB1[i][0] == 1)
-            condition = (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
-          else if (progRB1[i][0] == 2)
-            condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
-          else if (progRB1[i][0] == 3)
-            condition = (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
-          else if (progRB1[i][0] == 4)
-            condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
-          else if (progRB1[i][0] == 5)
-            condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
-          if (condition)
-          {
-            if (progAct[i] == 1 || progAct[i] == 6)
-              statusBuffer[2] = (progAct[i] == 1) ? MURUP : MATI;
-            if (progAct[i] == 2 || progAct[i] == 7)
-              statusBuffer[3] = (progAct[i] == 2) ? MURUP : MATI;
-            if (progAct[i] == 3 || progAct[i] == 8)
-              statusBuffer[0] = (progAct[i] == 3) ? MURUP : MATI;
-            if (progAct[i] == 4 || progAct[i] == 9)
-              statusBuffer[1] = (progAct[i] == 4) ? MURUP : MATI;
-            if (progAct[i] == 5 || progAct[i] == 10)
-              statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
-          }
-        }
-      }
-      Serial.printf("Condition of statusBuffer[%d] is %s\n", uselessNumberParser(progAct[i]), (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
-    }
-  }
-
-  if (bitRead(deviceStatus, BITPOS_TC_STATUS))
-  {
-    bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
-    bitWrite595(SFT_COOLER_RELAY, statusBuffer[1]);
-  }
-  else
-  {
-    bitWrite595(SFT_HEATER_RELAY, MATI);
-    bitWrite595(SFT_COOLER_RELAY, MATI);
-  }
-  bitWrite595(SFT_AUX1_RELAY, statusBuffer[2]);
-  bitWrite595(SFT_AUX2_RELAY, statusBuffer[3]);
-  bitWrite(deviceStatus, BITPOS_HEATER_STATUS, statusBuffer[0]);
-  bitWrite(deviceStatus, BITPOS_COOLER_STATUS, statusBuffer[1]);
-  bitWrite(deviceStatus, BITPOS_AUX1_STATUS, statusBuffer[2]);
-  bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[3]);
-  bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
-  free(statusBuffer);
 }
 
 uint8_t uselessNumberParser(uint8_t progAct)
@@ -914,6 +706,228 @@ uint8_t uselessNumberParser(uint8_t progAct)
   return 0;
 }
 
+void ICACHE_RAM_ATTR programScan(void)
+{
+  if (programStarted)
+  {
+    statusLED.update();
+    statusBuzzer.update();
+    bool *statusBuffer;
+    // 0 is heater, 1 is cooler, 2 is aux1, 3 is aux2
+    statusBuffer = (bool *)malloc(10);
+    // The algorithm that set PID Mode is just straight, the ifs is not there
+    statusBuffer[0] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
+    statusBuffer[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
+    statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
+    statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
+    statusBuffer[4] = bitRead(deviceStatus, BITPOS_TC_STATUS);
+    bool hcon =
+        ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
+         (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1));
+    bool ccon =
+        ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
+         (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1));
+    bool tcactive =
+        (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
+         bitRead(deviceStatus, BITPOS_TC_STATUS) == true);
+
+    if (tcactive && bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID && hcon)
+    {
+      if (heaterPID.GetMode() == MANUAL)
+        heaterPID.SetMode(AUTOMATIC);
+      heaterPID.Compute();
+      if (millis() - heaterWindowStart > (unsigned long)heaterDs)
+      {
+        //time to shift the Relay Window
+        heaterWindowStart += (unsigned long)heaterDs;
+      }
+      if ((unsigned long)heaterPidOutput < millis() - heaterWindowStart)
+        statusBuffer[0] = MATI;
+      else
+        statusBuffer[0] = MURUP;
+    }
+    else if (tcactive && bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_HYSTERESIS && hcon)
+    { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
+      if (heaterPID.GetMode() == AUTOMATIC)
+        heaterPID.SetMode(MANUAL);
+      if (newTemp >= thermalSetPoint + heaterBa)
+        heaterHysteresis = MATI;
+      else if (newTemp <= thermalSetPoint - heaterBb)
+        heaterHysteresis = MURUP;
+      statusBuffer[0] = heaterHysteresis;
+    }
+
+    if (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID && tcactive && ccon)
+    {
+      if (coolerPID.GetMode() == MANUAL)
+        coolerPID.SetMode(AUTOMATIC);
+      coolerPID.Compute();
+      if (millis() - coolerWindowStart > (unsigned long)coolerDs)
+      {
+        //time to shift the Relay Window
+        coolerWindowStart += (unsigned long)coolerDs;
+      }
+      if ((unsigned long)coolerPidOutput < millis() - coolerWindowStart)
+        statusBuffer[1] = MATI;
+      else
+        statusBuffer[1] = MURUP;
+    }
+    else if (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_HYSTERESIS && tcactive && ccon)
+    { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
+      if (coolerPID.GetMode() == AUTOMATIC)
+        coolerPID.SetMode(MANUAL);
+      if (newTemp >= thermalSetPoint + coolerBa)
+        coolerHysteresis = MURUP;
+      else if (newTemp <= thermalSetPoint - coolerBb)
+        coolerHysteresis = MATI;
+      statusBuffer[1] = coolerHysteresis;
+    }
+
+    for (int i = 0; i < 30; i++)
+    {
+      if (progTrig[i] != 0)
+      {
+        Serial.printf("progNum %d (+1) is Exist!\n", i + 1);
+        bool condition;
+        if (progTrig[i] == 1 || progTrig[i] == 2)
+        {
+          float *copyValue = (float *)malloc(sizeof(float) * 2);
+          memcpy(&copyValue[0], &progRB2[i], sizeof(float));
+          copyValue[1] = (progTrig[i] == 1) ? newTemp : newHumid;
+
+          // We only care about first byte, because nilai suhu's or humidity's(operator) value is no more than 3
+          if (progRB1[i][0] == 0)
+            condition = (copyValue[1] < copyValue[0]);
+          else if (progRB1[i][0] == 1)
+            condition = (copyValue[1] > copyValue[0]);
+          else if (progRB1[i][0] == 2)
+            condition = (copyValue[1] <= copyValue[0]);
+          else if (progRB1[i][0] == 3)
+            condition = (copyValue[1] >= copyValue[0]);
+          else
+            condition = false;
+
+          if (condition)
+          {
+            if (progAct[i] == 1 || progAct[i] == 6)
+              statusBuffer[2] = (progAct[i] == 1) ? MURUP : MATI;
+            if (progAct[i] == 2 || progAct[i] == 7)
+              statusBuffer[3] = (progAct[i] == 2) ? MURUP : MATI;
+            if (progAct[i] == 3 || progAct[i] == 8)
+              statusBuffer[0] = (progAct[i] == 3) ? MURUP : MATI;
+            if (progAct[i] == 4 || progAct[i] == 9)
+              statusBuffer[1] = (progAct[i] == 4) ? MURUP : MATI;
+            if (progAct[i] == 5 || progAct[i] == 10)
+              statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
+          }
+
+          free(copyValue);
+        }
+        if (progTrig[i] == 3 || progTrig[i] == 4)
+        {
+          DateTime now = rtc.now();
+          bool condition;
+          unsigned long *uCopyValue = (unsigned long *)malloc(sizeof(unsigned long) * 3);
+          memcpy(&uCopyValue[0], &progRB1[i], sizeof(unsigned long));
+          memcpy(&uCopyValue[1], &progRB2[i], sizeof(unsigned long));
+          if (progTrig[i] == 4)
+          {
+            Serial.printf("It was Tgw\n");
+            if (now.unixtime() >= uCopyValue[0])
+            {
+              condition = (now.unixtime() < uCopyValue[1]) ? true : false;
+              if (condition)
+              {
+                if (progAct[i] < 6)
+                  statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
+                else if (progAct[i] >= 6)
+                  statusBuffer[uselessNumberParser(progAct[i])] = MATI;
+                progFlag[i] = true;
+                Serial.printf("Forcing Action to %s", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
+              }
+              else if (progFlag[i])
+              {
+                if (progAct[i] < 6)
+                  statusBuffer[uselessNumberParser(progAct[i])] = MATI;
+                else if (progAct[i] >= 6)
+                  statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
+                progFlag[i] = false;
+                Serial.printf("Flipping Action to %s", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
+              }
+            }
+          }
+          else if (progTrig[i] == 3)
+          {
+            uCopyValue[2] = (now.hour() * 3600) + (now.minute() * 60) + now.second();
+            condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
+            Serial.printf("It was Jadwal\n");
+            if (condition)
+            {
+              if (progAct[i] < 6)
+                statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
+              else if (progAct[i] >= 6)
+                statusBuffer[uselessNumberParser(progAct[i])] = MATI;
+              progFlag[i] = true;
+              Serial.printf("Forcing Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
+            }
+            else if (progFlag[i])
+            {
+              if (progAct[i] < 6)
+                statusBuffer[uselessNumberParser(progAct[i])] = MATI;
+              else if (progAct[i] >= 6)
+                statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
+              progFlag[i] = false;
+              Serial.printf("Flipping Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
+            }
+          }
+          free(uCopyValue);
+        }
+        if (progTrig[i] == 5 && progRB2[i][0] != 0)
+        {
+          if (progRB2[i][0] != 0)
+          {
+            if (progRB1[i][0] == 1)
+              condition = (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+            else if (progRB1[i][0] == 2)
+              condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+            else if (progRB1[i][0] == 3)
+              condition = (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+            else if (progRB1[i][0] == 4)
+              condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+            else if (progRB1[i][0] == 5)
+              condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+            if (condition)
+            {
+              if (progAct[i] == 1 || progAct[i] == 6)
+                statusBuffer[2] = (progAct[i] == 1) ? MURUP : MATI;
+              if (progAct[i] == 2 || progAct[i] == 7)
+                statusBuffer[3] = (progAct[i] == 2) ? MURUP : MATI;
+              if (progAct[i] == 3 || progAct[i] == 8)
+                statusBuffer[0] = (progAct[i] == 3) ? MURUP : MATI;
+              if (progAct[i] == 4 || progAct[i] == 9)
+                statusBuffer[1] = (progAct[i] == 4) ? MURUP : MATI;
+              if (progAct[i] == 5 || progAct[i] == 10)
+                statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
+            }
+          }
+        }
+        Serial.printf("Condition of statusBuffer[%d] is %s\n", uselessNumberParser(progAct[i]), (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
+      }
+    }
+
+    bitWrite595(SFT_HEATER_RELAY, (bitRead(deviceStatus, BITPOS_TC_STATUS)) ? statusBuffer[0] : MATI);
+    bitWrite595(SFT_COOLER_RELAY, (bitRead(deviceStatus, BITPOS_TC_STATUS)) ? statusBuffer[1] : MATI);
+    bitWrite595(SFT_AUX1_RELAY, statusBuffer[2]);
+    bitWrite595(SFT_AUX2_RELAY, statusBuffer[3]);
+    bitWrite(deviceStatus, BITPOS_HEATER_STATUS, (bitRead(deviceStatus, BITPOS_TC_STATUS)) ? statusBuffer[0] : MATI);
+    bitWrite(deviceStatus, BITPOS_COOLER_STATUS, (bitRead(deviceStatus, BITPOS_TC_STATUS)) ? statusBuffer[1] : MATI);
+    bitWrite(deviceStatus, BITPOS_AUX1_STATUS, statusBuffer[2]);
+    bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[3]);
+    bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
+    free(statusBuffer);
+  }
+}
+
 ////////////////////////////////////// IO API ///////////////////////////////////////////////////////
 void toggle595Bit(byte docchi)
 {
@@ -921,7 +935,7 @@ void toggle595Bit(byte docchi)
   sr.set(docchi, bitRead595(docchi));
 }
 
-void bitWrite595(byte docchi, bool status)
+void bitWrite595(uint8_t docchi, uint8_t status)
 {
   sr.set(docchi, status);
   if (status)
@@ -1184,7 +1198,14 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
   http.addHeader(F("Content-Type"), F("application/json"));
   http.addHeader(F("Device-Token"), storedDeviceToken);
   http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
-  http.addHeader(F("ESP8266-MAC"), WiFi.macAddress().c_str());
+  http.addHeader(F("ESP8266-SDK-VERSION"), String(ESP.getSdkVersion()));
+  http.addHeader(F("ESP8266-CORE-VERSION"), String(ESP.getCoreVersion()));
+  http.addHeader(F("ESP8266-MAC"), WiFi.macAddress());
+  http.addHeader(F("ESP8266-SKETCH-MD5"), ESP.getSketchMD5());
+  http.addHeader(F("ESP8266-SKETCH-FREE-SPACE"), String(ESP.getFreeSketchSpace()));
+  http.addHeader(F("ESP8266-SKETCH-SIZE"), String(ESP.getSketchSize()));
+  http.addHeader(F("ESP8266-CHIP-SIZE"), String(ESP.getFlashChipSize()));
+
   // start connection and send HTTP header and body
   int httpCode = http.POST(data);
   responseCode = httpCode;

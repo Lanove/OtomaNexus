@@ -1,0 +1,22 @@
+##############################################
+# Syntax Coloring Map For arduino-led-blinker
+##############################################
+
+##############################################
+# Datatypes (KEYWORD1)
+##############################################
+
+LEDBlinker	KEYWORD1
+
+##############################################
+# Methods and Functions (KEYWORD2)
+##############################################
+
+set_interval	KEYWORD2
+set_pattern		KEYWORD2
+blink			KEYWORD2
+run_pattern		KEYWORD2
+on				KEYWORD2
+off				KEYWORD2
+toggle			KEYWORD2
+
