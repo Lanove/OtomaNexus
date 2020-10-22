@@ -128,6 +128,8 @@ DallasTemperature ds18b(&oneWire);
 ESP8266Timer ITimer;
 Blinker statusLED(SFT_LED_STATUS, &bitWrite595);
 Blinker statusBuzzer(SFT_BUZZER, &bitWrite595);
+uint8_t buzzerErrorPattern[] = {1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0};
+uint8_t buzzerSuccessPattern[] = {1, 0, 1, 0, 1, 0, 0, 0, 0, 0};
 
 bool programStarted = false;
 bool blinkerStarted = false;
@@ -187,10 +189,16 @@ byte progRB2[30][4];
 byte progAct[30];
 bool progFlag[30];
 
+const String freeSketch = String(ESP.getFreeSketchSpace());
+const String sketchSize = String(ESP.getSketchSize());
+const String chipSize = String(ESP.getFlashChipSize());
+const String sketchMD5 = ESP.getSketchMD5();
+
 void setup(void)
 {
   Serial.begin(74880); // Start the Serial communication to send messages to the computer
-
+  Serial.printf(
+      "freeSketch : %s\nsketchSize : %s\nchipSize : %s\nsketchMD5 : %s\n", freeSketch.c_str(), sketchSize.c_str(), chipSize.c_str(), sketchMD5.c_str());
   Serial.println("Init");
   ESP.resetFreeContStack();
   uint32_t freeStackStart = ESP.getFreeContStack();
@@ -201,10 +209,10 @@ void setup(void)
   storedSoftSSID.reserve(32);
   storedSoftWifiPass.reserve(64);
   storedDeviceToken.reserve(10);
-
-  delay(10);
+  statusBuzzer.on();
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
+  statusBuzzer.off();
 
   if (!rtc.begin())
   {
@@ -212,9 +220,17 @@ void setup(void)
     // failed to init rtc
     // add some loud ass error buzzer here
     // rtc is important element, so stop right here if something is wrong
-    while (true)
-    {
-    }
+
+    statusBuzzer.off();
+    statusBuzzer.on();
+    delay(2000);
+    statusBuzzer.off();
+    delay(2000);
+    statusBuzzer.on();
+    delay(2000);
+    statusBuzzer.off();
+    delay(500);
+    ESP.restart();
   }
   eeprom.initialize();
   delay(100);
@@ -291,6 +307,15 @@ void setup(void)
   Serial.println("im here2");
   if (!bitReadFB(FB_CONNECTED))
   {
+    statusBuzzer.off();
+    statusBuzzer.on();
+    delay(500);
+    statusBuzzer.off();
+    delay(500);
+    statusBuzzer.on();
+    delay(500);
+    statusBuzzer.off();
+    delay(500);
     initiateSoftAP();
     deployWebServer(); // Deploy web server
   }
@@ -308,6 +333,15 @@ void setup(void)
           eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
           delay(10);
         }
+        statusBuzzer.off();
+        statusBuzzer.on();
+        delay(100);
+        statusBuzzer.off();
+        delay(100);
+        statusBuzzer.on();
+        delay(100);
+        statusBuzzer.off();
+        delay(100);
         break;
       }
       timeOutCounter++;
@@ -320,6 +354,10 @@ void setup(void)
         Serial.println("Rebooting attempt 1");
         bitWrite(storedFirstByte, FB_WIFI_ERROR1, true);
         eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+        statusBuzzer.off();
+        statusBuzzer.on();
+        delay(2000);
+        statusBuzzer.off();
         delay(500);
         ESP.restart();
       }
@@ -330,11 +368,24 @@ void setup(void)
           Serial.println("Rebooting attempt 2");
           bitWrite(storedFirstByte, FB_WIFI_ERROR2, true);
           eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+          statusBuzzer.off();
+          statusBuzzer.on();
+          delay(2000);
+          statusBuzzer.off();
           delay(500);
           ESP.restart();
         }
         else
         {
+          statusBuzzer.off();
+          statusBuzzer.on();
+          delay(500);
+          statusBuzzer.off();
+          delay(500);
+          statusBuzzer.on();
+          delay(500);
+          statusBuzzer.off();
+          delay(500);
           initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
           deployWebServer();
           bitWrite(storedFirstByte, FB_CONNECTED, false);
@@ -365,16 +416,20 @@ void setup(void)
         // failed to init rtc
         // add some loud ass error buzzer here
         // rtc is important element, so stop right here if something is wrong
-        while (true)
-        {
-          // do something here
-        }
+        statusBuzzer.off();
+        statusBuzzer.on();
+        delay(2000);
+        statusBuzzer.off();
+        delay(2000);
+        statusBuzzer.on();
+        delay(2000);
+        statusBuzzer.off();
+        delay(500);
+        ESP.restart();
       }
     }
   }
 
-  statusBuzzer.setInterval(100);
-  statusBuzzer.disableAfter(300);
   programStarted = true;
   uint32_t freeStackEnd = ESP.getFreeContStack();
   Serial.printf("\nCONT stack used at start: %d\n-------\n\n", freeStackStart - freeStackEnd);
@@ -658,6 +713,14 @@ void loop(void)
     bitWrite(storedFirstByte, FB_CONNECTED, false);
     eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
     delay(10);
+    statusBuzzer.off();
+    statusBuzzer.on();
+    delay(2000);
+    statusBuzzer.off();
+    delay(2000);
+    statusBuzzer.on();
+    delay(2000);
+    statusBuzzer.off();
     delay(500);
     ESP.reset();
   }
@@ -1199,12 +1262,12 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
   http.addHeader(F("Device-Token"), storedDeviceToken);
   http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
   http.addHeader(F("ESP8266-SDK-VERSION"), String(ESP.getSdkVersion()));
-  http.addHeader(F("ESP8266-CORE-VERSION"), String(ESP.getCoreVersion()));
+  http.addHeader(F("ESP8266-CORE-VERSION"), ESP.getCoreVersion());
   http.addHeader(F("ESP8266-MAC"), WiFi.macAddress());
-  http.addHeader(F("ESP8266-SKETCH-MD5"), ESP.getSketchMD5());
-  http.addHeader(F("ESP8266-SKETCH-FREE-SPACE"), String(ESP.getFreeSketchSpace()));
-  http.addHeader(F("ESP8266-SKETCH-SIZE"), String(ESP.getSketchSize()));
-  http.addHeader(F("ESP8266-CHIP-SIZE"), String(ESP.getFlashChipSize()));
+  http.addHeader(F("ESP8266-SKETCH-MD5"), sketchMD5);
+  http.addHeader(F("ESP8266-SKETCH-FREE-SPACE"), freeSketch);
+  http.addHeader(F("ESP8266-SKETCH-SIZE"), sketchSize);
+  http.addHeader(F("ESP8266-CHIP-SIZE"), chipSize);
 
   // start connection and send HTTP header and body
   int httpCode = http.POST(data);
@@ -1289,9 +1352,11 @@ bool initiateClient(const String &ssid, const String &pass)
     else
     {
       Serial.print(".");
-      bitWrite595(SFT_LED_STATUS, HIGH);
+      statusLED.on();
+      statusBuzzer.on();
       delay(250);
-      bitWrite595(SFT_LED_STATUS, LOW);
+      statusBuzzer.off();
+      statusLED.off();
       delay(250);
     }
     if (i >= 29)
@@ -1343,6 +1408,10 @@ void pgRoot()
 void pgRestart()
 {
   server.send(200, "text/plain", "restart");
+  statusBuzzer.off();
+  statusBuzzer.on();
+  delay(500);
+  statusBuzzer.off();
   delay(500);
   ESP.reset();
 }
@@ -1401,7 +1470,7 @@ void pgAccInfo()
     }
     else
     { // It seems that first request is failed, let's wait for 1s and try again for the second time
-      delay(1000);
+      delay(3000);
       HTTPClient http;
       fetchURL(FPSTR(identifyURL), json, httpCode, responseStatus);
       http.end();
@@ -1422,6 +1491,16 @@ void pgAccInfo()
   else // Cannot connect to WiFi, report invalid SSID or Password!
     responseStatus = "invwifi";
   // Reinitiate softAP and re deploy the web server to 192.168.4.1
+  if (responseStatus == "invwifi" || responseStatus == "nocon")
+  {
+    statusBuzzer.setPattern(500, buzzerErrorPattern, sizeof(buzzerErrorPattern) / sizeof(buzzerErrorPattern[0]));
+    statusBuzzer.disableAfter(10000);
+  }
+  else if (responseStatus == "success" || responseStatus == "recon")
+  {
+    statusBuzzer.setPattern(100, buzzerSuccessPattern, sizeof(buzzerErrorPattern) / sizeof(buzzerErrorPattern[0]));
+    statusBuzzer.disableAfter(10000);
+  }
   closeClient();
   closeServer();
   closeSoftAP();
