@@ -1,4 +1,4 @@
-#define BUILD_VERSION "9.0.0"
+#define BUILD_VERSION "1.0.0"
 
 #define EEPROM_ADDRESS 0x50
 
@@ -88,6 +88,7 @@
 #define MODE_OPERATION_MANUAL 0
 #define MODE_OPERATION_AUTO 1
 
+static const char espUpdater[] PROGMEM = "http://192.168.7.220:8080/otoma/api/ESPUpdater.php";
 static const char requestURL[] PROGMEM = "http://192.168.7.220:8080/otoma/api/nexusControllerRequest.php";
 static const char identifyURL[] PROGMEM = "http://192.168.7.220:8080/otoma/api/identifyDevice.php";
 // This is the minified file of html document to reduce flash usage

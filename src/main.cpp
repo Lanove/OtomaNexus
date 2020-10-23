@@ -68,9 +68,9 @@ Keterangan Pin :
 #include <time.h>
 #include <constants.h>
 #include <PID_v1.h>
-#include <ESP8266TimerInterrupt.h>
 #include <ESP8266httpUpdate.h>
 
+#include <Ticker.h>
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <RTClib.h>
@@ -115,7 +115,7 @@ void byteWrite595(const uint8_t data);
 void selectMux(byte channel);
 int readMux();
 uint8_t uselessNumberParser(uint8_t progAct);
-ICACHE_RAM_ATTR void programScan(void);
+void programScan(void);
 
 HTTPClient http;
 WiFiClient client;
@@ -128,7 +128,7 @@ DHT dht(DHTPIN, DHTTYPE);
 ShiftRegister74HC595<1> sr(DATA595, CLOCK595, LATCH595);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature ds18b(&oneWire);
-ESP8266Timer ITimer;
+Ticker programScanner;
 Blinker statusLED(SFT_LED_STATUS, &bitWrite595);
 Blinker statusBuzzer(SFT_BUZZER, &bitWrite595);
 uint8_t buzzerErrorPattern[] = {1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0};
@@ -302,8 +302,8 @@ void setup(void)
   coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
 
   byteWrite595(0x00);
-  ITimer.attachInterruptInterval(100000, programScan);
   programStarted = false;
+  programScanner.attach_ms(40, programScan);
   closeClient();
   closeSoftAP();
   closeServer();
@@ -398,7 +398,8 @@ void setup(void)
       }
     }
     programStarted = false;
-    t_httpUpdate_return ret = ESPhttpUpdate.update(client, "http://192.168.7.220:8080/otoma/api/ESPUpdater.php", BUILD_VERSION);
+    byteWrite595(0x00);
+    t_httpUpdate_return ret = ESPhttpUpdate.update(client, FPSTR(espUpdater), BUILD_VERSION);
     switch (ret)
     {
     case HTTP_UPDATE_FAILED:
@@ -757,8 +758,12 @@ uint8_t uselessNumberParser(uint8_t progAct)
   return 0;
 }
 
-ICACHE_RAM_ATTR void programScan(void)
+uint32_t ddd;
+
+void programScan(void)
 {
+  Serial.printf("programScan cycle : %d", millis() - ddd);
+  ddd = millis();
   if (programStarted)
   {
     statusLED.update();
