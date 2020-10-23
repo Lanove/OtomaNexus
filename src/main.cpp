@@ -95,8 +95,8 @@ bool initiateSoftAP();
 bool initiateClient(const String &ssid, const String &pass);
 void deployWebServer();
 void closeServer();
-bool closeSoftAP();
-bool closeClient();
+void closeSoftAP();
+void closeClient();
 bool isWifiConnected();
 void fetchURL(const String &URL, const String &payload, int &responseCode, String &response);
 void writeByteEEPROM(int addr, byte data);
@@ -300,21 +300,14 @@ void setup(void)
 
   byteWrite595(0x00);
   ITimer.attachInterruptInterval(100000, programScan);
+  programStarted = false;
   closeClient();
   closeSoftAP();
   closeServer();
+  programStarted = true;
   Serial.println("im here2");
   if (!bitReadFB(FB_CONNECTED))
   {
-    statusBuzzer.off();
-    statusBuzzer.on();
-    delay(500);
-    statusBuzzer.off();
-    delay(500);
-    statusBuzzer.on();
-    delay(500);
-    statusBuzzer.off();
-    delay(500);
     initiateSoftAP();
     deployWebServer(); // Deploy web server
   }
@@ -332,15 +325,6 @@ void setup(void)
           eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
           delay(10);
         }
-        statusBuzzer.off();
-        statusBuzzer.on();
-        delay(100);
-        statusBuzzer.off();
-        delay(100);
-        statusBuzzer.on();
-        delay(100);
-        statusBuzzer.off();
-        delay(100);
         break;
       }
       timeOutCounter++;
@@ -353,10 +337,6 @@ void setup(void)
         Serial.println("Rebooting attempt 1");
         bitWrite(storedFirstByte, FB_WIFI_ERROR1, true);
         eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
-        statusBuzzer.off();
-        statusBuzzer.on();
-        delay(2000);
-        statusBuzzer.off();
         delay(500);
         ESP.restart();
       }
@@ -367,24 +347,11 @@ void setup(void)
           Serial.println("Rebooting attempt 2");
           bitWrite(storedFirstByte, FB_WIFI_ERROR2, true);
           eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
-          statusBuzzer.off();
-          statusBuzzer.on();
-          delay(2000);
-          statusBuzzer.off();
           delay(500);
           ESP.restart();
         }
         else
         {
-          statusBuzzer.off();
-          statusBuzzer.on();
-          delay(500);
-          statusBuzzer.off();
-          delay(500);
-          statusBuzzer.on();
-          delay(500);
-          statusBuzzer.off();
-          delay(500);
           initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
           deployWebServer();
           bitWrite(storedFirstByte, FB_CONNECTED, false);
@@ -429,7 +396,6 @@ void setup(void)
     }
   }
 
-  programStarted = true;
   uint32_t freeStackEnd = ESP.getFreeContStack();
   Serial.printf("\nCONT stack used at start: %d\n-------\n\n", freeStackStart - freeStackEnd);
 }
@@ -712,7 +678,7 @@ void loop(void)
   }
   if (disconnectFlag && millis() - disconnectStamp >= MAXIMUM_DISCONNECT_TIME)
   {
-    writeToEEPROM(WIFISSID, "GAGAL KONEKSI");
+    writeToEEPROM(WIFISSID, "KONEKSI TERPUTUS");
     writeToEEPROM(WIFIPW, " ");
     bitWrite(storedFirstByte, FB_CONNECTED, false);
     eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
@@ -1326,7 +1292,6 @@ bool initiateSoftAP()
     }
   }
   Serial.println();
-  delay(100);
   for (int i = 0; i < 20; i++)
   {
     if (WiFi.softAP(storedSoftSSID, storedSoftWifiPass))
@@ -1341,8 +1306,17 @@ bool initiateSoftAP()
       delay(500);
     }
   }
-  delay(100);
   programStarted = true;
+
+  statusBuzzer.off();
+  statusBuzzer.on();
+  delay(500);
+  statusBuzzer.off();
+  delay(500);
+  statusBuzzer.on();
+  delay(500);
+  statusBuzzer.off();
+  delay(500);
   return timeOutFlag;
 }
 
@@ -1378,21 +1352,47 @@ bool initiateClient(const String &ssid, const String &pass)
     }
   }
   programStarted = true;
+  if (successFlag)
+  {
+    statusBuzzer.off();
+    statusBuzzer.on();
+    delay(100);
+    statusBuzzer.off();
+    delay(100);
+    statusBuzzer.on();
+    delay(100);
+    statusBuzzer.off();
+    delay(100);
+  }
+  else
+  {
+
+    statusBuzzer.off();
+    statusBuzzer.on();
+    delay(2000);
+    statusBuzzer.off();
+    delay(100);
+  }
   return successFlag;
 }
 
-bool closeSoftAP()
+void closeSoftAP()
 {
-  return WiFi.softAPdisconnect(true);
+  programStarted = false;
+  WiFi.softAPdisconnect(true);
+  programStarted = true;
 }
 
-bool closeClient()
+void closeClient()
 {
-  return WiFi.disconnect(true);
+  programStarted = false;
+  WiFi.disconnect(true);
+  programStarted = true;
 }
 
 void deployWebServer()
 {
+  programStarted = false;
   // Call the 'handleRoot' function when a client requests URI "/"
   server.on("/", HTTP_GET, pgRoot);
 
@@ -1404,12 +1404,15 @@ void deployWebServer()
   server.onNotFound(handleNotFound);
   server.begin();
   serverAvailable = true;
+  programStarted = true;
 }
 
 void closeServer()
 {
+  programStarted = false;
   server.close();
   serverAvailable = false;
+  programStarted = true;
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1458,13 +1461,12 @@ void pgAccInfo()
     // Initiate HTTP Request to identifyDevice.php
     Serial.print("[HTTP] begin...\n");
     int httpCode;
-    const size_t capacity = JSON_OBJECT_SIZE(5);
-    DynamicJsonDocument doc(capacity);
+    StaticJsonDocument<360> doc;
     String json;
     doc[F("username")] = usrn.c_str();
     doc[F("password")] = unpw.c_str();
     doc[F("softssid")] = storedSoftSSID.c_str();
-    doc[F("softpw")] = storedSoftWifiPass.c_str();
+    doc[F("softpswd")] = storedSoftWifiPass.c_str();
     serializeJson(doc, json);
     Serial.printf("JSON Size : %d\n", doc.memoryUsage());
     Serial.printf("Transferred JSON : %s\n", json.c_str());
@@ -1484,11 +1486,10 @@ void pgAccInfo()
     else
     { // It seems that first request is failed, let's wait for 1s and try again for the second time
       delay(3000);
-      HTTPClient http;
       fetchURL(FPSTR(identifyURL), json, httpCode, responseStatus);
-      http.end();
       if (httpCode == HTTP_CODE_OK)
       { // Success fetched!, store the message to responseStatus!
+
         if (responseStatus == "success" || responseStatus == "recon")
         {
           writeToEEPROM(USERNAME, usrn);
@@ -1504,21 +1505,22 @@ void pgAccInfo()
   else // Cannot connect to WiFi, report invalid SSID or Password!
     responseStatus = "invwifi";
   // Reinitiate softAP and re deploy the web server to 192.168.4.1
-  if (responseStatus == "invwifi" || responseStatus == "nocon")
-  {
-    statusBuzzer.setPattern(500, buzzerErrorPattern, sizeof(buzzerErrorPattern) / sizeof(buzzerErrorPattern[0]));
-    statusBuzzer.disableAfter(10000);
-  }
-  else if (responseStatus == "success" || responseStatus == "recon")
-  {
-    statusBuzzer.setPattern(100, buzzerSuccessPattern, sizeof(buzzerErrorPattern) / sizeof(buzzerErrorPattern[0]));
-    statusBuzzer.disableAfter(10000);
-  }
   closeClient();
   closeServer();
   closeSoftAP();
   initiateSoftAP();
   deployWebServer();
+
+  if (responseStatus == "success" || responseStatus == "recon")
+  {
+    statusBuzzer.setPattern(100, buzzerSuccessPattern, sizeof(buzzerErrorPattern) / sizeof(buzzerErrorPattern[0]));
+    statusBuzzer.disableAfter(3000);
+  }
+  else
+  {
+    statusBuzzer.setPattern(500, buzzerErrorPattern, sizeof(buzzerErrorPattern) / sizeof(buzzerErrorPattern[0]));
+    statusBuzzer.disableAfter(3000);
+  }
 }
 
 void pgReqStatus()
