@@ -131,71 +131,73 @@ DallasTemperature ds18b(&oneWire);
 Ticker programScanner;
 Blinker statusLED(SFT_LED_STATUS, &bitWrite595);
 Blinker statusBuzzer(SFT_BUZZER, &bitWrite595);
-uint8_t buzzerErrorPattern[] = {1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0};
-uint8_t buzzerSuccessPattern[] = {1, 0, 1, 0, 1, 0, 0, 0, 0, 0};
+uint8_t buzzerErrorPattern[] = {1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0},
+        buzzerSuccessPattern[] = {1, 0, 1, 0, 1, 0, 0, 0, 0, 0};
 
-bool programStarted = false;
-bool blinkerStarted = false;
+bool programStarted = false,
+     blinkerStarted = false;
 
-String storedUsername;
-String storedSSID;
-String storedWifiPass;
-String storedSoftSSID;
-String storedSoftWifiPass;
-String storedUserpass;
-String storedDeviceToken;
+String storedUsername,
+    storedSSID,
+    storedWifiPass,
+    storedSoftSSID,
+    storedSoftWifiPass,
+    storedUserpass,
+    storedDeviceToken;
 byte storedFirstByte;
-bool serverAvailable;
-bool triedLog = false;
-unsigned long disconnectStamp;
-unsigned long requestMillis;
-unsigned long sensorMillis;
-byte dhtSampleCounter;
-bool disconnectFlag;
-byte byte595Status;
-bool bit595Status;
-byte deviceStatus;
-byte htclMode;
+bool serverAvailable,
+    triedLog = false;
+unsigned long disconnectStamp,
+    requestMillis,
+    sensorMillis,
+    updateCheckMillis;
 
-float newTemp;
-float newHumid;
+byte dhtSampleCounter,
+    byte595Status,
+    deviceStatus,
+    htclMode;
+bool disconnectFlag,
+    bit595Status;
 
-float thermalSetPoint;
+float newTemp,
+    newHumid,
 
-float heaterKp;
-float heaterKi;
-float heaterKd;
-float heaterDs;
-float heaterPidOutput;
+    thermalSetPoint,
+
+    heaterKp,
+    heaterKi,
+    heaterKd,
+    heaterDs,
+    heaterPidOutput;
 unsigned long heaterWindowStart;
 PID heaterPID(&newTemp, &heaterPidOutput, &thermalSetPoint, heaterKp, heaterKi, heaterKd, DIRECT);
 
 bool heaterHysteresis;
-float heaterBa;
-float heaterBb;
+float heaterBa,
+    heaterBb,
 
-float coolerKp;
-float coolerKi;
-float coolerKd;
-float coolerDs;
-float coolerPidOutput;
+    coolerKp,
+    coolerKi,
+    coolerKd,
+    coolerDs,
+    coolerPidOutput;
 unsigned long coolerWindowStart;
 PID coolerPID(&newTemp, &coolerPidOutput, &thermalSetPoint, coolerKp, coolerKi, coolerKd, REVERSE);
 
-float coolerBa;
-float coolerBb;
+float coolerBa,
+    coolerBb;
 bool coolerHysteresis;
 
-byte progTrig[30];
-byte progRB1[30][4];
-byte progRB2[30][4];
-byte progAct[30];
+byte progTrig[30],
+    progRB1[30][4],
+    progRB2[30][4],
+    progAct[30];
 bool progFlag[30];
 
-const String freeSketch = String(ESP.getFreeSketchSpace());
-const String sketchSize = String(ESP.getSketchSize());
-const String chipSize = String(ESP.getFlashChipSize());
-const String sketchMD5 = ESP.getSketchMD5();
+const String freeSketch = String(ESP.getFreeSketchSpace()),
+             sketchSize = String(ESP.getSketchSize()),
+             chipSize = String(ESP.getFlashChipSize()),
+             sketchMD5 = ESP.getSketchMD5();
 
 void setup(void)
 {
@@ -398,7 +400,6 @@ void setup(void)
       }
     }
     programStarted = false;
-    byteWrite595(0x00);
     t_httpUpdate_return ret = ESPhttpUpdate.update(client, FPSTR(espUpdater), BUILD_VERSION);
     switch (ret)
     {
@@ -712,6 +713,27 @@ void loop(void)
     delay(500);
     ESP.reset();
   }
+  if (millis() - updateCheckMillis >= UPDATE_CHECK_INTERVAL)
+  {
+    Serial.println("Checking update");
+    programStarted = false;
+    byteWrite595(0x00);
+    t_httpUpdate_return ret = ESPhttpUpdate.update(client, FPSTR(espUpdater), BUILD_VERSION);
+    switch (ret)
+    {
+    case HTTP_UPDATE_FAILED:
+      Serial.println("[update] Update failed.");
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("[update] Update no Update.");
+      break;
+    case HTTP_UPDATE_OK:
+      Serial.println("[update] Update ok."); // may not be called since we reboot the ESP
+      break;
+    }
+    programStarted = true;
+    updateCheckMillis = millis();
+  }
   delay(50);
 }
 
@@ -762,8 +784,6 @@ uint32_t ddd;
 
 void programScan(void)
 {
-  Serial.printf("programScan cycle : %d", millis() - ddd);
-  ddd = millis();
   if (programStarted)
   {
     statusLED.update();
