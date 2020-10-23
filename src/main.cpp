@@ -3,8 +3,8 @@ Todo :
 DONE Add softSSID,softPW,softIPAddress at setting menu of otoma web
 DONE Check last update of ESP8266 on server to notify the user when the ESP8266 is not updating for more than 5 minute (because disconnect)
 CANCELLED Add notifier on otoma web when user update automation program but automation program is not fetched by ESP8266 for some reason (disconnected or such)
-- Add buzzer notification for WiFi fail connect, disconnect, time out.
-- Add LED status for WiFi connecting, and setup status
+DONE Add buzzer notification for WiFi fail connect, disconnect, time out.
+DONE Add LED status for WiFi connecting, and setup status
 DONE Create Shift Register API -- done part
 POSTPONED Create Analog Input API -- done part
 DONE Remove != and == from comparator list
@@ -13,15 +13,17 @@ DONE Lol, the name is operator, not comparator. to be exact, it was relational o
 DONE Fix parse input on web automation program
 - Optimize stack usage by moving memory usage to heap with malloc/free/calloc
 DONE Do reload status just for read-only thing (like temp, humid)
-- Add timeout response for AJAX on web
+DONE Add timeout response for AJAX on web
 DONE Please remove that useless auto filter of pid/hys parameter input
-- Create our own parser for jadwal harian picker (fkin buggy)
+DONE PARTIAL Create our own parser for jadwal harian picker (fkin buggy)
 DONE Reload Status of web every 3 second, and create a flag that there are update from ESP, and web will fetch it and server will clear that flag.
-- Change the logic of plot graphing
+X Change the logic of plot graphing
 - Add stop/pause for automation program, if paused controller will ignore it. 
 - Add PID output status on web
 DONE Add timeout feature
 - Improve update fetch algorithm
+DONE polish PID algorithm
+- Fix offline request crash
 
 Idea : 
 - do something like this on automation program
@@ -577,6 +579,7 @@ void loop(void)
                   eeprom.writeByte(ADDR_HTCL_MODE, htclMode);
                   delay(10);
                   heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
+                  heaterPidOutput = 0;
                   Serial.printf("Received Heater Param Update!\nhHeater Mode : %s\nheaterKp : %f\nheaterKi : %f\nheaterKd : %f\nheaterDs : %f\nheaterBa : %f\nheaterBb : %f\n", (bitRead(htclMode, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb);
                 }
                 if (out["cpam"])
@@ -609,6 +612,7 @@ void loop(void)
                   bitWrite(htclMode, BITPOS_COOLER_MODE, out["cmd"].as<bool>());
                   eeprom.writeByte(ADDR_HTCL_MODE, htclMode);
                   coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
+                  coolerPidOutput = 0;
                   delay(10);
                   // writeByte mode
                   Serial.printf("Received Cooler Param Update!\nCooler Mode : %s\ncoolerKp : %f\ncoolerKi : %f\ncoolerKd : %f\ncoolerDs : %f\ncoolerBa : %f\ncoolerBb : %f\n", (bitRead(htclMode, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
@@ -724,6 +728,7 @@ void loop(void)
     delay(500);
     ESP.reset();
   }
+  delay(50);
 }
 
 void debugMemory()
@@ -769,15 +774,14 @@ uint8_t uselessNumberParser(uint8_t progAct)
   return 0;
 }
 
-void ICACHE_RAM_ATTR programScan(void)
+ICACHE_RAM_ATTR void programScan(void)
 {
   if (programStarted)
   {
     statusLED.update();
     statusBuzzer.update();
-    bool *statusBuffer;
+    bool statusBuffer[10];
     // 0 is heater, 1 is cooler, 2 is aux1, 3 is aux2
-    statusBuffer = (bool *)malloc(10);
     // The algorithm that set PID Mode is just straight, the ifs is not there
     statusBuffer[0] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
     statusBuffer[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
@@ -860,7 +864,7 @@ void ICACHE_RAM_ATTR programScan(void)
         bool condition;
         if (progTrig[i] == 1 || progTrig[i] == 2)
         {
-          float *copyValue = (float *)malloc(sizeof(float) * 2);
+          float copyValue[2];
           memcpy(&copyValue[0], &progRB2[i], sizeof(float));
           copyValue[1] = (progTrig[i] == 1) ? newTemp : newHumid;
 
@@ -889,14 +893,12 @@ void ICACHE_RAM_ATTR programScan(void)
             if (progAct[i] == 5 || progAct[i] == 10)
               statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
           }
-
-          free(copyValue);
         }
         if (progTrig[i] == 3 || progTrig[i] == 4)
         {
           DateTime now = rtc.now();
           bool condition;
-          unsigned long *uCopyValue = (unsigned long *)malloc(sizeof(unsigned long) * 3);
+          unsigned long uCopyValue[3];
           memcpy(&uCopyValue[0], &progRB1[i], sizeof(unsigned long));
           memcpy(&uCopyValue[1], &progRB2[i], sizeof(unsigned long));
           if (progTrig[i] == 4)
@@ -949,7 +951,6 @@ void ICACHE_RAM_ATTR programScan(void)
               Serial.printf("Flipping Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
             }
           }
-          free(uCopyValue);
         }
         if (progTrig[i] == 5 && progRB2[i][0] != 0)
         {
@@ -965,6 +966,8 @@ void ICACHE_RAM_ATTR programScan(void)
               condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
             else if (progRB1[i][0] == 5)
               condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+            else
+              condition = false;
             if (condition)
             {
               if (progAct[i] == 1 || progAct[i] == 6)
@@ -993,7 +996,7 @@ void ICACHE_RAM_ATTR programScan(void)
     bitWrite(deviceStatus, BITPOS_AUX1_STATUS, statusBuffer[2]);
     bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[3]);
     bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
-    free(statusBuffer);
+    // free(statusBuffer);
   }
 }
 
@@ -1302,6 +1305,7 @@ bool isWifiConnected()
 
 bool initiateSoftAP()
 {
+  programStarted = false;
   bool timeOutFlag = 1;
   IPAddress local_IP(192, 168, 4, 1);
   IPAddress gateway(192, 168, 4, 2);
@@ -1338,11 +1342,14 @@ bool initiateSoftAP()
     }
   }
   delay(100);
+  programStarted = true;
   return timeOutFlag;
 }
 
 bool initiateClient(const String &ssid, const String &pass)
 {
+  programStarted = false;
+  byteWrite595(0x00);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
   bool successFlag = false;
@@ -1370,6 +1377,7 @@ bool initiateClient(const String &ssid, const String &pass)
       successFlag = 0;
     }
   }
+  programStarted = true;
   return successFlag;
 }
 
@@ -1440,6 +1448,7 @@ void pgAccInfo()
     wfpw = "overlength";
 
   Serial.printf("Username : %s\nPassword : %s\nSSID : %s\nWiFiPW : %s\n", usrn.c_str(), unpw.c_str(), ssid.c_str(), wfpw.c_str());
+
   if (initiateClient(ssid, wfpw))
   {
     // This WiFi seems legit, let's save to EEPROM
@@ -1449,15 +1458,13 @@ void pgAccInfo()
     // Initiate HTTP Request to identifyDevice.php
     Serial.print("[HTTP] begin...\n");
     int httpCode;
-    DynamicJsonDocument doc(500);
+    const size_t capacity = JSON_OBJECT_SIZE(5);
+    DynamicJsonDocument doc(capacity);
     String json;
     doc[F("username")] = usrn.c_str();
     doc[F("password")] = unpw.c_str();
-    doc[F("devicetoken")] = storedDeviceToken.c_str();
     doc[F("softssid")] = storedSoftSSID.c_str();
     doc[F("softpw")] = storedSoftWifiPass.c_str();
-    doc[F("mac")] = WiFi.macAddress().c_str();
-    doc[F("semver")] = BUILD_VERSION;
     serializeJson(doc, json);
     Serial.printf("JSON Size : %d\n", doc.memoryUsage());
     Serial.printf("Transferred JSON : %s\n", json.c_str());
@@ -1512,7 +1519,6 @@ void pgAccInfo()
   closeSoftAP();
   initiateSoftAP();
   deployWebServer();
-  debugMemory();
 }
 
 void pgReqStatus()
@@ -1528,7 +1534,6 @@ void pgReqStatus()
   Serial.printf("JSON Size : %d\n", doc.memoryUsage());
   Serial.printf("Transferring JSON : %s\n", json.c_str());
   server.send(200, "application/json", json);
-  debugMemory();
 }
 
 void handleNotFound()
