@@ -1,4 +1,4 @@
-#define BUILD_VERSION "1.0.0"
+#define BUILD_VERSION "9.0.0"
 
 #define EEPROM_ADDRESS 0x50
 

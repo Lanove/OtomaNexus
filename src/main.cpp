@@ -69,6 +69,7 @@ Keterangan Pin :
 #include <constants.h>
 #include <PID_v1.h>
 #include <ESP8266TimerInterrupt.h>
+#include <ESP8266httpUpdate.h>
 
 #include <ArduinoJson.h>
 #include <Wire.h>
@@ -114,7 +115,7 @@ void byteWrite595(const uint8_t data);
 void selectMux(byte channel);
 int readMux();
 uint8_t uselessNumberParser(uint8_t progAct);
-void ICACHE_RAM_ATTR programScan(void);
+ICACHE_RAM_ATTR void programScan(void);
 
 HTTPClient http;
 WiFiClient client;
@@ -282,6 +283,8 @@ void setup(void)
   }
 
   loadAllPrograms();
+  Serial.println("HEEELLLOOOOOO");
+  Serial.println(BUILD_VERSION);
   Serial.printf("Thermal Setpoint : %f\nHeater Mode : %s\nHeater Kp: %f\nHeater Ki: %f\nHeater Kd: %f\nHeater Ds: %f\nHeater Ba: %f\nHeater Bb: %f\nCooler Mode : %s\nCooler Kp: %f\nCooler Ki: %f\nCooler Kd: %f\nCooler Ds: %f\nCooler Ba: %f\nCooler Bb: %f\n", thermalSetPoint, (bitRead(htclMode, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb, (bitRead(htclMode, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
   Serial.printf("Thermocontroller Info\nTherco Operation : %s\nTherco Mode %s\n", (bitRead(deviceStatus, BITPOS_TC_OPERATION)) ? "AUTO" : "MANUAL", (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "HEATER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "COOLER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "DUAL" : "INVALID");
   Serial.printf("Status\nAux Status 1 : %d\nAux Status 2 : %d\nThermocontrol Status : %d\nHeater Status : %d\nCooler Status : %d\n", bitRead(deviceStatus, BITPOS_AUX1_STATUS), bitRead(deviceStatus, BITPOS_AUX2_STATUS), bitRead(deviceStatus, BITPOS_TC_STATUS), bitRead(deviceStatus, BITPOS_HEATER_STATUS), bitRead(deviceStatus, BITPOS_COOLER_STATUS));
@@ -394,6 +397,21 @@ void setup(void)
         ESP.restart();
       }
     }
+    programStarted = false;
+    t_httpUpdate_return ret = ESPhttpUpdate.update(client, "http://192.168.7.220:8080/otoma/api/ESPUpdater.php", BUILD_VERSION);
+    switch (ret)
+    {
+    case HTTP_UPDATE_FAILED:
+      Serial.println("[update] Update failed.");
+      break;
+    case HTTP_UPDATE_NO_UPDATES:
+      Serial.println("[update] Update no Update.");
+      break;
+    case HTTP_UPDATE_OK:
+      Serial.println("[update] Update ok."); // may not be called since we reboot the ESP
+      break;
+    }
+    programStarted = true;
   }
 
   uint32_t freeStackEnd = ESP.getFreeContStack();
@@ -448,6 +466,7 @@ void loop(void)
       {
         ESP.resetFreeContStack();
         uint32_t freeStackStart = ESP.getFreeContStack();
+        uint32_t timeTakenStart = millis();
         DateTime now = rtc.now();
         if (timeClient.update())
         {
@@ -545,7 +564,6 @@ void loop(void)
                   eeprom.writeByte(ADDR_HTCL_MODE, htclMode);
                   delay(10);
                   heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
-                  heaterPidOutput = 0;
                   Serial.printf("Received Heater Param Update!\nhHeater Mode : %s\nheaterKp : %f\nheaterKi : %f\nheaterKd : %f\nheaterDs : %f\nheaterBa : %f\nheaterBb : %f\n", (bitRead(htclMode, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb);
                 }
                 if (out["cpam"])
@@ -578,7 +596,6 @@ void loop(void)
                   bitWrite(htclMode, BITPOS_COOLER_MODE, out["cmd"].as<bool>());
                   eeprom.writeByte(ADDR_HTCL_MODE, htclMode);
                   coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
-                  coolerPidOutput = 0;
                   delay(10);
                   // writeByte mode
                   Serial.printf("Received Cooler Param Update!\nCooler Mode : %s\ncoolerKp : %f\ncoolerKi : %f\ncoolerKd : %f\ncoolerDs : %f\ncoolerBa : %f\ncoolerBb : %f\n", (bitRead(htclMode, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
@@ -667,7 +684,7 @@ void loop(void)
         requestMillis = millis();
         debugMemory();
         uint32_t freeStackEnd = ESP.getFreeContStack();
-        Serial.printf("\nCONT stack used at main fetch url: %d\n-------\n\n", freeStackStart - freeStackEnd);
+        Serial.printf("Main online routine takes : %dms\nCONT stack used at main fetch url: %d\n-------\n\n", millis() - timeTakenStart, freeStackStart - freeStackEnd);
       }
     }
     else
@@ -775,9 +792,11 @@ ICACHE_RAM_ATTR void programScan(void)
         //time to shift the Relay Window
         heaterWindowStart += (unsigned long)heaterDs;
       }
-      if (heaterPidOutput == 0)
-        heaterPidOutput = 0.01;
-      if ((unsigned long)((heaterPidOutput * (heaterDs / 255.0)) < millis() - heaterWindowStart))
+
+      float copyOutput = heaterPidOutput;
+      if (copyOutput <= 0)
+        copyOutput = 0.01;
+      if ((unsigned long)((copyOutput * (heaterDs / 255.0))) < millis() - heaterWindowStart)
         statusBuffer[0] = MATI;
       else
         statusBuffer[0] = MURUP;
@@ -804,9 +823,10 @@ ICACHE_RAM_ATTR void programScan(void)
         //time to shift the Relay Window
         coolerWindowStart += (unsigned long)coolerDs;
       }
-      if (coolerPidOutput == 0)
-        coolerPidOutput = 0.01;
-      if ((unsigned long)(coolerPidOutput * (coolerDs / 255.0) < millis() - coolerWindowStart))
+      float copyOutput = coolerPidOutput;
+      if (copyOutput <= 0)
+        copyOutput = 0.01;
+      if ((unsigned long)(coolerPidOutput * (coolerDs / 255.0)) < millis() - coolerWindowStart)
         statusBuffer[1] = MATI;
       else
         statusBuffer[1] = MURUP;
