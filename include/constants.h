@@ -2,6 +2,10 @@
 
 #define EEPROM_ADDRESS 0x50
 #define UPDATE_CHECK_INTERVAL 86400000 // ONE DAY
+#define LCD_UPDATE_INTERVAL 300
+#define HTTP_FETCH_INTERVAL 1000
+#define SENSOR_UPDATE_INTERVAL 1000
+#define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
 
 #define MURUP 1 // BEN GA BINGUNG, FOR SOME REASON, INVERTING OUTPUT CAUSES OSCILLATING
 #define MATI 0
@@ -30,6 +34,18 @@
 #define LATCH595 2
 #define CLOCK595 0
 
+#define ENCODER_PINA 16
+#define ENCODER_PINB 14
+#define ENCODER_BTN 12
+
+#define ENCODER_STEPS_PER_NOTCH 4 // Change this depending on which encoder is used
+
+#define ENC_UP 0
+#define ENC_DOWN 1
+#define ENC_OPEN ClickEncoder::Open
+#define ENC_CLICKED ClickEncoder::Clicked
+#define ENC_DBCLICKED ClickEncoder::DoubleClicked
+
 // QA to QH of 595, in sort
 #define SFT_LED_STATUS 0
 #define SFT_AUX2_RELAY 1
@@ -42,10 +58,7 @@
 
 #define ONE_WIRE_BUS 13
 
-#define REQUEST_DELAY 1000
-#define SENSOR_DELAY 1000
-#define DHT_LOOP 5                     // Means that DHT will sample once every 5 sample of DS18B20
-#define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
+#define DHT_LOOP 5 // Means that DHT will sample once every 5 sample of DS18B20
 
 #define ADDR_FIRST_BYTE 0
 

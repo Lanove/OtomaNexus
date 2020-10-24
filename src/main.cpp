@@ -80,6 +80,8 @@ Keterangan Pin :
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Blinker.h>
+#include <ClickEncoder.h>
+#include <LiquidCrystal_I2C.h>
 
 void debugMemory(); // Function to check free stack and heap remaining
 void storeString(int addrOffset, const String &strToWrite);
@@ -116,6 +118,9 @@ void selectMux(byte channel);
 int readMux();
 uint8_t uselessNumberParser(uint8_t progAct);
 void programScan(void);
+void encoderInit();
+void encoderUpdate(bool &direction, uint8_t &buttonstate, int16_t &encvalue, int16_t &delta);
+void encoderService();
 
 HTTPClient http;
 WiFiClient client;
@@ -129,10 +134,22 @@ ShiftRegister74HC595<1> sr(DATA595, CLOCK595, LATCH595);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature ds18b(&oneWire);
 Ticker programScanner;
+Ticker encoderServicer;
 Blinker statusLED(SFT_LED_STATUS, &bitWrite595);
 Blinker statusBuzzer(SFT_BUZZER, &bitWrite595);
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
 uint8_t buzzerErrorPattern[] = {1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0},
         buzzerSuccessPattern[] = {1, 0, 1, 0, 1, 0, 0, 0, 0, 0};
+
+ClickEncoder *encoder;
+
+ClickEncoder::Button b;
+int16_t enc_last, enc_value, enc_lastbutstate;
+bool dir;
+uint8_t bs;
+int16_t ev;
+int16_t dt;
 
 bool programStarted = false,
      blinkerStarted = false;
@@ -150,7 +167,8 @@ bool serverAvailable,
 unsigned long disconnectStamp,
     requestMillis,
     sensorMillis,
-    updateCheckMillis;
+    updateCheckMillis,
+    lcdUpdateMillis;
 
 byte dhtSampleCounter,
     byte595Status,
@@ -241,6 +259,9 @@ void setup(void)
   delay(100);
   ds18b.begin();
   delay(100);
+  lcd.begin();
+  encoderInit();
+  lcd.print("Hello, world!");
   dht.begin();
   loadInfo();
 
@@ -251,7 +272,9 @@ void setup(void)
       Serial.println("No DS18B20 FOUND!\nRestarting!");
       bitWrite(storedFirstByte, FB_DS_NF1, true);
       eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
-      delay(10);
+      statusBuzzer.on();
+      delay(2000);
+      statusBuzzer.off();
       delay(500);
       ESP.restart();
     }
@@ -260,12 +283,18 @@ void setup(void)
       Serial.println("No DS18B20 FOUND!\nRestarting!");
       bitWrite(storedFirstByte, FB_DS_NF2, true);
       eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
-      delay(10);
+      statusBuzzer.on();
+      delay(2000);
+      statusBuzzer.off();
       delay(500);
       ESP.restart();
     }
     else
     {
+      statusBuzzer.on();
+      delay(2000);
+      statusBuzzer.off();
+      delay(500);
       Serial.println("No DS18B20 FOUND!\nProgress without DS18B20!");
       bitWrite(storedFirstByte, FB_DS_NF1, false);
       bitWrite(storedFirstByte, FB_DS_NF2, false);
@@ -306,6 +335,7 @@ void setup(void)
   byteWrite595(0x00);
   programStarted = false;
   programScanner.attach_ms(40, programScan);
+  encoderServicer.attach_ms(1, encoderService);
   closeClient();
   closeSoftAP();
   closeServer();
@@ -422,7 +452,7 @@ void setup(void)
 
 void loop(void)
 {
-  if (millis() - sensorMillis >= SENSOR_DELAY)
+  if (millis() - sensorMillis >= SENSOR_UPDATE_INTERVAL)
   {
     float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
     dhtSampleCounter--;
@@ -464,7 +494,7 @@ void loop(void)
   {
     if (isWifiConnected())
     {
-      if (millis() - requestMillis >= REQUEST_DELAY)
+      if (millis() - requestMillis >= HTTP_FETCH_INTERVAL)
       {
         ESP.resetFreeContStack();
         uint32_t freeStackStart = ESP.getFreeContStack();
@@ -786,11 +816,11 @@ uint8_t uselessNumberParser(uint8_t progAct)
 }
 
 uint32_t ddd;
-
 void programScan(void)
 {
   if (programStarted)
   {
+    encoderUpdate(dir, bs, ev, dt); //
     statusLED.update();
     statusBuzzer.update();
     bool statusBuffer[10];
@@ -1009,7 +1039,70 @@ void programScan(void)
     bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
     // free(statusBuffer);
   }
+  if (millis() - lcdUpdateMillis >= LCD_UPDATE_INTERVAL)
+  {
+    ddd++;
+    lcd.setCursor(0, 1);
+    lcd.print(ddd);
+    lcd.setCursor(0, 2);
+    lcd.print(ev);
+    lcd.setCursor(0, 3);
+    if (b != ClickEncoder::Open)
+    {
+      Serial.print("Button: ");
+#define VERBOSECASE(label) \
+  case label:              \
+    lcd.print(#label);     \
+    break;
+      switch (b)
+      {
+        VERBOSECASE(ClickEncoder::Pressed);
+        VERBOSECASE(ClickEncoder::Held)
+        VERBOSECASE(ClickEncoder::Released)
+        VERBOSECASE(ClickEncoder::Clicked)
+        VERBOSECASE(ClickEncoder::DoubleClicked)
+      }
+    }
+    lcdUpdateMillis = millis();
+  }
 }
+
+////////////// ENCODER API /////////////////
+void encoderInit()
+{
+  encoder = new ClickEncoder(ENCODER_PINA, ENCODER_PINB, ENCODER_BTN, ENCODER_STEPS_PER_NOTCH);
+  encoder->setAccelerationEnabled(true);
+  enc_last = -1;
+}
+
+void encoderService()
+{
+  encoder->service();
+}
+
+void encoderUpdate(bool &direction, uint8_t &buttonstate, int16_t &encvalue, int16_t &delta)
+{
+  enc_value += encoder->getValue();
+  b = encoder->getButton();
+  buttonstate = b;
+  encvalue = enc_value;
+  delta = enc_value - enc_last;
+
+  if (enc_value != enc_last)
+  {
+    if (enc_last > enc_value)
+    {
+      direction = ENC_DOWN;
+    }
+    else if (enc_last < enc_value)
+    {
+      direction = ENC_UP;
+    }
+  }
+  enc_lastbutstate = b;
+  enc_last = enc_value;
+}
+////////////////////////////////////////////
 
 ////////////////////////////////////// IO API ///////////////////////////////////////////////////////
 void toggle595Bit(byte docchi)
