@@ -666,14 +666,19 @@ void loop(void)
 
                 free(buffer);
               }
-            }
-            if (response == "forget")
-            {
-              bitWrite(storedFirstByte, FB_CONNECTED, false);
-              eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
-              delay(10);
-              delay(500);
-              ESP.reset();
+              else if (strcmp(order, "fallback") == 0)
+              {
+                bitWrite(storedFirstByte, FB_CONNECTED, false);
+                eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
+                delay(10);
+                delay(500);
+                ESP.reset();
+              }
+              else if (strcmp(order, "restart") == 0)
+              {
+                delay(500);
+                ESP.reset();
+              }
             }
           }
         }
@@ -813,7 +818,6 @@ void programScan(void)
       heaterPID.Compute();
       if (millis() - heaterWindowStart > (unsigned long)heaterDs)
       {
-        Serial.println("heaterShift");
         //time to shift the Relay Window
         heaterWindowStart += (unsigned long)heaterDs;
       }
@@ -844,7 +848,6 @@ void programScan(void)
       coolerPID.Compute();
       if (millis() - coolerWindowStart > (unsigned long)coolerDs)
       {
-        Serial.println("coolerShift");
         //time to shift the Relay Window
         coolerWindowStart += (unsigned long)coolerDs;
       }
@@ -871,7 +874,6 @@ void programScan(void)
     {
       if (progTrig[i] != 0)
       {
-        Serial.printf("progNum %d (+1) is Exist!\n", i + 1);
         bool condition;
         if (progTrig[i] == 1 || progTrig[i] == 2)
         {
@@ -905,7 +907,7 @@ void programScan(void)
               statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
           }
         }
-        if (progTrig[i] == 3 || progTrig[i] == 4)
+        else if (progTrig[i] == 3 || progTrig[i] == 4)
         {
           DateTime now = rtc.now();
           bool condition;
@@ -914,7 +916,6 @@ void programScan(void)
           memcpy(&uCopyValue[1], &progRB2[i], sizeof(unsigned long));
           if (progTrig[i] == 4)
           {
-            Serial.printf("It was Tgw\n");
             if (now.unixtime() >= uCopyValue[0])
             {
               condition = (now.unixtime() < uCopyValue[1]) ? true : false;
@@ -925,7 +926,6 @@ void programScan(void)
                 else if (progAct[i] >= 6)
                   statusBuffer[uselessNumberParser(progAct[i])] = MATI;
                 progFlag[i] = true;
-                Serial.printf("Forcing Action to %s", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
               }
               else if (progFlag[i])
               {
@@ -934,7 +934,6 @@ void programScan(void)
                 else if (progAct[i] >= 6)
                   statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
                 progFlag[i] = false;
-                Serial.printf("Flipping Action to %s", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
               }
             }
           }
@@ -942,7 +941,6 @@ void programScan(void)
           {
             uCopyValue[2] = (now.hour() * 3600) + (now.minute() * 60) + now.second();
             condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
-            Serial.printf("It was Jadwal\n");
             if (condition)
             {
               if (progAct[i] < 6)
@@ -950,7 +948,6 @@ void programScan(void)
               else if (progAct[i] >= 6)
                 statusBuffer[uselessNumberParser(progAct[i])] = MATI;
               progFlag[i] = true;
-              Serial.printf("Forcing Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
             }
             else if (progFlag[i])
             {
@@ -959,24 +956,23 @@ void programScan(void)
               else if (progAct[i] >= 6)
                 statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
               progFlag[i] = false;
-              Serial.printf("Flipping Action to %s\n", (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
             }
           }
         }
-        if (progTrig[i] == 5 && progRB2[i][0] != 0)
+        else if (progTrig[i] == 5 && progRB2[i][0] != 0)
         {
           if (progRB2[i][0] != 0)
           {
             if (progRB1[i][0] == 1)
-              condition = (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+              condition = (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else if (progRB1[i][0] == 2)
-              condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+              condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else if (progRB1[i][0] == 3)
-              condition = (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+              condition = (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else if (progRB1[i][0] == 4)
-              condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+              condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else if (progRB1[i][0] == 5)
-              condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == (progRB2[i][0] == 1) ? MURUP : MATI);
+              condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else
               condition = false;
             if (condition)
@@ -994,16 +990,20 @@ void programScan(void)
             }
           }
         }
-        Serial.printf("Condition of statusBuffer[%d] is %s\n", uselessNumberParser(progAct[i]), (statusBuffer[uselessNumberParser(progAct[i])] == MURUP) ? "MURUP" : "MATI");
       }
     }
 
-    bitWrite595(SFT_HEATER_RELAY, (bitRead(deviceStatus, BITPOS_TC_STATUS)) ? statusBuffer[0] : MATI);
-    bitWrite595(SFT_COOLER_RELAY, (bitRead(deviceStatus, BITPOS_TC_STATUS)) ? statusBuffer[1] : MATI);
+    if (!bitRead(deviceStatus, BITPOS_TC_STATUS))
+    {
+      statusBuffer[0] = MATI;
+      statusBuffer[1] = MATI;
+    }
+    bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
+    bitWrite595(SFT_COOLER_RELAY, statusBuffer[1]);
     bitWrite595(SFT_AUX1_RELAY, statusBuffer[2]);
     bitWrite595(SFT_AUX2_RELAY, statusBuffer[3]);
-    bitWrite(deviceStatus, BITPOS_HEATER_STATUS, (bitRead(deviceStatus, BITPOS_TC_STATUS)) ? statusBuffer[0] : MATI);
-    bitWrite(deviceStatus, BITPOS_COOLER_STATUS, (bitRead(deviceStatus, BITPOS_TC_STATUS)) ? statusBuffer[1] : MATI);
+    bitWrite(deviceStatus, BITPOS_HEATER_STATUS, statusBuffer[0]);
+    bitWrite(deviceStatus, BITPOS_COOLER_STATUS, statusBuffer[1]);
     bitWrite(deviceStatus, BITPOS_AUX1_STATUS, statusBuffer[2]);
     bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[3]);
     bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
@@ -1362,6 +1362,7 @@ bool initiateSoftAP()
   delay(500);
   statusBuzzer.off();
   delay(500);
+  statusBuzzer.off();
   return timeOutFlag;
 }
 
@@ -1390,6 +1391,8 @@ bool initiateClient(const String &ssid, const String &pass)
       statusBuzzer.off();
       statusLED.off();
       delay(250);
+      statusBuzzer.off();
+      statusLED.off();
     }
     if (i >= 29)
     {
@@ -1408,15 +1411,16 @@ bool initiateClient(const String &ssid, const String &pass)
     delay(100);
     statusBuzzer.off();
     delay(100);
+    statusBuzzer.off();
   }
   else
   {
-
     statusBuzzer.off();
     statusBuzzer.on();
     delay(2000);
     statusBuzzer.off();
     delay(100);
+    statusBuzzer.off();
   }
   return successFlag;
 }
