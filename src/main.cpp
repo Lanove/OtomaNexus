@@ -215,9 +215,9 @@ byte progTrig[30],
     progAct[30];
 bool progFlag[30];
 
-byte lcdScreen = 1,
-     lcdCursor,
-     lcdRowPos;
+int lcdScreen = 1,
+    lcdCursor,
+    lcdRowPos;
 bool lcdCursorBlinkFlag,
     lcdCursorBlinkStatus;
 unsigned long lcdCursorBlinkTimer;
@@ -279,8 +279,8 @@ char lcdRowBuffer[4][20];
 //     prev_act;
 
 // cursor dynamics
-byte prev_lcdCursor;
-byte prev_lcdRowPos;
+int prev_lcdCursor;
+int prev_lcdRowPos;
 
 const String freeSketch = String(ESP.getFreeSketchSpace()),
              sketchSize = String(ESP.getSketchSize()),
@@ -306,9 +306,13 @@ void setup(void)
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
   statusBuzzer.off();
+  lcdSetup();
 
   if (!rtc.begin())
   {
+    lcd.print("GAGAL MEMULAI SISTEM");
+    lcd.setCursor(0, 1);
+    lcd.print("RTC ERROR");
     Serial.println("Couldn't Start RTC!");
     // failed to init rtc
     // add some loud ass error buzzer here
@@ -329,7 +333,6 @@ void setup(void)
   delay(100);
   ds18b.begin();
   delay(100);
-  lcd.begin();
   encoderInit();
   dht.begin();
   loadInfo();
@@ -338,6 +341,11 @@ void setup(void)
   {
     if (!bitReadFB(FB_DS_NF1))
     {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Sensor Suhu Error!");
+      lcd.setCursor(0, 1);
+      lcd.print("Mengulang sistem...");
       Serial.println("No DS18B20 FOUND!\nRestarting!");
       bitWrite(storedFirstByte, FB_DS_NF1, true);
       eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
@@ -349,6 +357,10 @@ void setup(void)
     }
     else if (!bitReadFB(FB_DS_NF2))
     {
+      lcd.setCursor(0, 0);
+      lcd.print("Sensor Suhu Error!");
+      lcd.setCursor(0, 1);
+      lcd.print("Mengulang sistem...");
       Serial.println("No DS18B20 FOUND!\nRestarting!");
       bitWrite(storedFirstByte, FB_DS_NF2, true);
       eeprom.writeByte(ADDR_FIRST_BYTE, storedFirstByte);
@@ -360,6 +372,12 @@ void setup(void)
     }
     else
     {
+      lcd.setCursor(0, 0);
+      lcd.print("Sensor Suhu Error!");
+      lcd.setCursor(0, 1);
+      lcd.print("Melanjutkan");
+      lcd.setCursor(0, 2);
+      lcd.print("tanpa sensor suhu");
       statusBuzzer.on();
       delay(2000);
       statusBuzzer.off();
@@ -456,6 +474,12 @@ void setup(void)
         }
         else
         {
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Gagal menyambung WiFi");
+          lcd.setCursor(0, 1);
+          lcd.printf("%.20s", storedSSID.c_str());
+          delay(1000);
           initiateSoftAP(); // Seems that SSID is invalid, initiate Soft AP instead
           deployWebServer();
           bitWrite(storedFirstByte, FB_CONNECTED, false);
@@ -515,6 +539,7 @@ void setup(void)
     programStarted = true;
   }
 
+  lcdTransition(1);
   uint32_t freeStackEnd = ESP.getFreeContStack();
   Serial.printf("\nCONT stack used at start: %d\n-------\n\n", freeStackStart - freeStackEnd);
 }
@@ -884,11 +909,85 @@ uint8_t uselessNumberParser(uint8_t progAct)
   return 0;
 }
 
+bool encSelecting;
+byte encSelectorCounter;
+unsigned long encSelectorTimer;
+int encUpperLimit;
+const int encLowerLimit = 0;
+
 void programScan(void)
 {
   if (programStarted)
   {
     encoderUpdate(dir, bs, ev, dt); //
+    if (millis() - lcdUpdateMillis >= LCD_UPDATE_INTERVAL)
+    {
+      lcdUpdate();
+      lcdUpdateMillis = millis();
+    }
+    if (millis() >= encSelectorTimer + 400)
+    {
+      encSelectorTimer = millis();
+      encSelectorCounter = 0;
+    }
+    if (dt != 0)
+    { // If encoder is rotated and it's not selecting, then
+      // Need 2 step of encode to move the cursor, and if no movement, the counter will reset.
+      encSelectorCounter++;
+      encSelectorTimer = millis();
+      if (encSelectorCounter >= 2)
+      {
+        if (dir == ENC_UP) // if the rotation is clockwise, then add value of lcdCursor
+          lcdCursor++;
+        else // if the rotation is counter-clockwise, then reduce value of lcdCursor
+          lcdCursor--;
+        encSelectorCounter = 0;
+      }
+      //Constrain the value of lcdCursor according to each lcdScreen limit
+      if (lcdScreen == 1)
+        encUpperLimit = 0;
+      else if (lcdScreen == 2 || lcdScreen == 3)
+        encUpperLimit = 4;
+      else if (lcdScreen == 4)
+        encUpperLimit = 5;
+
+      if (lcdCursor < encLowerLimit)
+        lcdCursor = encLowerLimit;
+      if (lcdCursor > encUpperLimit)
+        lcdCursor = encUpperLimit;
+
+      Serial.printf("lcdCursor %d\n", lcdCursor);
+    }
+
+    if (bs == ENC_DBCLICKED)
+    { // Navigation
+      if (lcdScreen == 1)
+        lcdTransition(2);
+      else if (lcdScreen == 2)
+      {
+        if (lcdCursor == 0)
+          lcdTransition(3);
+        else if (lcdCursor == 1)
+          lcdTransition(4);
+        else if (lcdCursor == 2)
+          lcdTransition(8);
+        else if (lcdCursor == 3)
+          lcdTransition(7);
+        else if (lcdCursor == 4)
+          lcdTransition(1);
+      }
+      else if (lcdScreen == 3)
+      {
+        if (lcdCursor == 4)
+          lcdTransition(2);
+      }
+      else if (lcdScreen == 4)
+      {
+        if (lcdCursor == 5)
+          lcdTransition(2);
+      }
+    }
+
     if (dt != 0)
       Serial.printf("Encoder Value %d\n", ev);
     if (bs == ENC_CLICKED || bs == ENC_DBCLICKED)
@@ -1111,10 +1210,6 @@ void programScan(void)
     bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
     // free(statusBuffer);
   }
-  if (millis() - lcdUpdateMillis >= LCD_UPDATE_INTERVAL)
-  {
-    lcdUpdateMillis = millis();
-  }
 }
 
 /////////////////////////////////////////// LCD API ///////////////////////////////////////////////
@@ -1142,36 +1237,36 @@ void lcdTransition(int screen, int progNum)
     lcd.printf("%s", (isWifiConnected()) ? "ONLINE" : "OFFLINE");
     lcd.setCursor(1, 1);
     lcd.printf("Hmdt:%05.1f%%", newHumid);
-    lcd.setCursor(0, 2);
-    lcd.print(LCD_ARROW);
-    lcd.printf("SP  : %04.1f");
+    lcd.setCursor(1, 2);
+    lcd.printf("SP  : %04.1f", thermalSetPoint);
     lcd.print(LCD_DEGREE); // print [degree] character
     lcd.print("C");
-    lcd.setCursor(1, 3);
-    lcd.print("Kembali");
+    lcd.setCursor(0, 3);
+    lcd.print(LCD_ARROW);
+    lcd.print("Menu");
   }
   else if (screen == 2)
   {
     DateTime now = rtc.now();
     lcd.setCursor(0, 0);
     lcd.print(LCD_ARROW);
-    lcd.printf("Output   Kembali");
+    lcd.printf("Output         Back");
     lcd.setCursor(1, 1);
     lcd.printf("Therco");
     lcd.setCursor(1, 2);
-    lcd.printf("Program  %02d:%02d:%04d", now.day(), now.month(), now.year());
+    lcd.printf("Program  %02d/%02d/%04d", now.day(), now.month(), now.year());
     lcd.setCursor(1, 3);
-    lcd.printf("Info     %02d:%02d:%02d", now.hour(), now.minute(), now.second());
+    lcd.printf("Info      %02d:%02d:%02d", now.hour(), now.minute(), now.second());
   }
   else if (screen == 3)
   {
     lcd.setCursor(0, 0);
     lcd.print(LCD_ARROW);
     lcd.printf("Pemanas:%s", (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == MURUP) ? "ON" : "OFF");
-    lcd.setCursor(14, 0);
-    lcd.print("Kembali");
+    lcd.setCursor(16, 0);
+    lcd.print("Back");
     lcd.setCursor(1, 1);
-    lcd.printf("Pendingin:%s", (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == MURUP) ? "ON" : "OFF");
+    lcd.printf("Pendngin:%s", (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == MURUP) ? "ON" : "OFF");
     lcd.setCursor(1, 2);
     lcd.printf("Output 1:%s", (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == MURUP) ? "ON" : "OFF");
     lcd.setCursor(1, 3);
@@ -1194,13 +1289,13 @@ void lcdTransition(int screen, int progNum)
     lcd.setCursor(1, 3);
     lcd.print("Opsi Pemanas");
     sprintf(lcdRowBuffer[3], "Opsi Pemanas");
-    lcd.setCursor(14, 0);
-    lcd.print("Kembali");
+    lcd.setCursor(16, 0);
+    lcd.print("Back");
   }
   else if (screen == 5)
   {
     lcd.setCursor(0, 0);
-    lcd.print("Pemanas       Kembali");
+    lcd.print("Pemanas         Back");
     lcd.setCursor(0, 1);
     lcd.print(LCD_ARROW);
     lcd.printf("Mode:%s", (bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID) ? "PID" : "HYS");
@@ -1212,7 +1307,7 @@ void lcdTransition(int screen, int progNum)
   else if (screen == 6)
   {
     lcd.setCursor(0, 0);
-    lcd.print("Pendingin     Kembali");
+    lcd.print("Pendingin       Back");
     lcd.setCursor(0, 1);
     lcd.print(LCD_ARROW);
     lcd.printf("Mode:%s", (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
@@ -1223,14 +1318,16 @@ void lcdTransition(int screen, int progNum)
   }
   else if (screen == 7)
   {
-    lcd.setCursor(1, 0);
+    lcd.setCursor(0, 0);
     lcd.printf("Soft AP:%.12s", storedSoftSSID.c_str());
-    lcd.setCursor(1, 1);
+    lcd.setCursor(0, 1);
     lcd.printf("Soft PW:%.12s", storedSoftWifiPass.c_str());
-    lcd.setCursor(1, 2);
+    lcd.setCursor(0, 2);
     lcd.print("IP:192.168.4.1"); // this guy is the same every esp, so its fine to hardcode
-    lcd.setCursor(1, 3);
-    lcd.printf("Ver:%s     Kembali", BUILD_VERSION);
+    lcd.setCursor(0, 3);
+    lcd.printf("Ver:%s", BUILD_VERSION);
+    lcd.setCursor(16, 3);
+    lcd.print("Back");
   }
   else if (screen == 8)
   {
@@ -1276,8 +1373,6 @@ void lcdTransition(int screen, int progNum)
         lcd.setCursor(1, 3);
         lcd.printf("Program %d", activeProg[3]);
       }
-      lcd.setCursor(11, 0);
-      lcd.print("Kembali");
     }
     else
     {
@@ -1288,6 +1383,8 @@ void lcdTransition(int screen, int progNum)
       lcd.setCursor(0, 1);
       lcd.print("program");
     }
+    lcd.setCursor(16, 0);
+    lcd.print("Back");
   }
   else if (screen == 9)
   {
@@ -1331,14 +1428,15 @@ void lcdTransition(int screen, int progNum)
     }
     lcd.setCursor(0, 3);
     lcd.printf("Aksi:%s", (progAct[progNum] == 1) ? "Ny Out1" : (progAct[progNum] == 2) ? "Ny Out2" : (progAct[progNum] == 3) ? "Ny Pmns" : (progAct[progNum] == 4) ? "Ny Pndn" : (progAct[progNum] == 5) ? "Ny Thco" : (progAct[progNum] == 6) ? "Mt Out1" : (progAct[progNum] == 7) ? "Mt Out2" : (progAct[progNum] == 8) ? "Mt Pmns" : (progAct[progNum] == 9) ? "Mt Pndn" : (progAct[progNum] == 10) ? "Mt Thco" : "null");
-    lcd.setCursor(12, 0);
-    lcd.printf("Program%02d", progNum + 1);
-    lcd.setCursor(13, 3);
+    lcd.setCursor(15, 0);
+    lcd.printf("PRG%02d", progNum + 1);
+    lcd.setCursor(16, 3);
     lcd.print(LCD_ARROW);
-    lcd.print("Kembali");
+    lcd.print("Back");
   }
 }
 
+unsigned long screen2millis;
 void lcdUpdate()
 {
   if (lcdScreen == 1)
@@ -1371,6 +1469,16 @@ void lcdUpdate()
     DateTime now = rtc.now();
     if (prev_lcdCursor != lcdCursor)
     {
+      lcd.setCursor(0, 0);
+      lcd.print(" ");
+      lcd.setCursor(0, 1);
+      lcd.print(" ");
+      lcd.setCursor(0, 2);
+      lcd.print(" ");
+      lcd.setCursor(0, 3);
+      lcd.print(" ");
+      lcd.setCursor(15, 0);
+      lcd.print(" ");
       if (lcdCursor == 0)
         lcd.setCursor(0, 0);
       else if (lcdCursor == 1)
@@ -1380,15 +1488,30 @@ void lcdUpdate()
       else if (lcdCursor == 3)
         lcd.setCursor(0, 3);
       else if (lcdCursor == 4)
-        lcd.setCursor(9, 0);
+        lcd.setCursor(15, 0);
+      lcd.print(LCD_ARROW);
     }
-    lcd.setCursor(10, 3);
-    lcd.printf("%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+    if (millis() - screen2millis > 1000)
+    {
+      lcd.setCursor(11, 3);
+      lcd.printf("%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+      screen2millis = millis();
+    }
   }
   else if (lcdScreen == 3)
   {
     if (prev_lcdCursor != lcdCursor)
     {
+      lcd.setCursor(0, 0);
+      lcd.print(" ");
+      lcd.setCursor(0, 1);
+      lcd.print(" ");
+      lcd.setCursor(0, 2);
+      lcd.print(" ");
+      lcd.setCursor(0, 3);
+      lcd.print(" ");
+      lcd.setCursor(15, 0);
+      lcd.print(" ");
       if (lcdCursor == 0)
         lcd.setCursor(0, 0);
       else if (lcdCursor == 1)
@@ -1398,7 +1521,8 @@ void lcdUpdate()
       else if (lcdCursor == 3)
         lcd.setCursor(0, 3);
       else if (lcdCursor == 4)
-        lcd.setCursor(13, 0);
+        lcd.setCursor(15, 0);
+      lcd.print(LCD_ARROW);
     }
     if (prev_outStatus[0] != bitRead(deviceStatus, BITPOS_HEATER_STATUS))
     {
@@ -1423,7 +1547,6 @@ void lcdUpdate()
   }
   else if (lcdScreen == 4)
   {
-
     byte modeBuffer;
     bitWrite(modeBuffer, 0, bitRead(deviceStatus, BITPOS_TC_MODE_B0));
     bitWrite(modeBuffer, 1, bitRead(deviceStatus, BITPOS_TC_MODE_B1));
@@ -1440,20 +1563,20 @@ void lcdUpdate()
     {
       lcd.setCursor(9, 1);
       lcd.printf("%s", (modeBuffer == 3) ? "Dual" : (modeBuffer == 1) ? "Cool" : (modeBuffer == 0) ? "Heat" : "");
-      sprintf(lcdRowBuffer[(lcdCursor < 4) ? 1 : 0], "Mode   :%s", (modeBuffer == 3) ? "Dual" : (modeBuffer == 1) ? "Cool" : (modeBuffer == 0) ? "Heat" : "");
+      sprintf(lcdRowBuffer[1 - lcdRowPos], "Mode   :%s", (modeBuffer == 3) ? "Dual" : (modeBuffer == 1) ? "Cool" : (modeBuffer == 0) ? "Heat" : "");
     }
     if (prev_tcOperation != bitRead(deviceStatus, BITPOS_TC_OPERATION))
     {
       lcd.setCursor(9, 2);
       lcd.printf("%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
-      sprintf(lcdRowBuffer[(lcdCursor < 4) ? 2 : 1], "Operasi:%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
+      sprintf(lcdRowBuffer[2 - lcdRowPos], "Operasi:%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
     }
-
     if (prev_lcdCursor != lcdCursor)
     {
       if (prev_lcdCursor == 3 && lcdCursor == 4 && lcdRowPos == 0)
       {
         lcdRowPos = 1;
+        lcd.clear();
         memcpy(&lcdRowBuffer[0], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
         memcpy(&lcdRowBuffer[1], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
         memcpy(&lcdRowBuffer[2], &lcdRowBuffer[3], sizeof lcdRowBuffer[3]);
@@ -1466,12 +1589,13 @@ void lcdUpdate()
         lcd.print(lcdRowBuffer[2]);
         lcd.setCursor(1, 3);
         lcd.print(lcdRowBuffer[3]);
-        lcd.setCursor(14, 0);
-        lcd.print("Kembali");
+        lcd.setCursor(16, 0);
+        lcd.print("Back");
       }
       else if (prev_lcdCursor == 1 && lcdCursor == 0 && lcdRowPos == 1)
       {
         lcdRowPos = 0;
+        lcd.clear();
         memcpy(&lcdRowBuffer[3], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
         memcpy(&lcdRowBuffer[2], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
         memcpy(&lcdRowBuffer[1], &lcdRowBuffer[0], sizeof lcdRowBuffer[0]);
@@ -1484,11 +1608,22 @@ void lcdUpdate()
         lcd.print(lcdRowBuffer[2]);
         lcd.setCursor(1, 3);
         lcd.print(lcdRowBuffer[3]);
-        lcd.setCursor(14, 0);
-        lcd.print("Kembali");
+        lcd.setCursor(16, 0);
+        lcd.print("Back");
       }
+
+      lcd.setCursor(0, 0);
+      lcd.print(" ");
+      lcd.setCursor(0, 1);
+      lcd.print(" ");
+      lcd.setCursor(0, 2);
+      lcd.print(" ");
+      lcd.setCursor(0, 3);
+      lcd.print(" ");
+      lcd.setCursor(15, 0);
+      lcd.print(" ");
       if (lcdCursor == 5)
-        lcd.setCursor(13, 0);
+        lcd.setCursor(15, 0);
       else if (lcdCursor == 4)
         lcd.setCursor(0, 3);
       else if (lcdCursor == 3)
@@ -1517,6 +1652,9 @@ void lcdUpdate()
   else if (lcdScreen == 9)
   {
   }
+
+  prev_lcdCursor = lcdCursor;
+  prev_lcdRowPos = lcdRowPos;
 
   prev_newTemp = newTemp;
   prev_newHumid = newHumid;
@@ -1894,6 +2032,14 @@ bool isWifiConnected()
 bool initiateSoftAP()
 {
   programStarted = false;
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Membuka soft AP");
+  lcd.setCursor(0, 1);
+  lcd.printf("%.20s", storedSoftSSID.c_str());
+  lcd.setCursor(0, 2);
+  lcd.print("Pada 192.168.4.1");
+
   bool timeOutFlag = 1;
   IPAddress local_IP(192, 168, 4, 1);
   IPAddress gateway(192, 168, 4, 2);
@@ -1946,6 +2092,11 @@ bool initiateSoftAP()
 bool initiateClient(const String &ssid, const String &pass)
 {
   programStarted = false;
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Menyambung ke WiFi");
+  lcd.setCursor(0, 1);
+  lcd.printf("%.20s", ssid.c_str());
   byteWrite595(0x00);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
@@ -1976,9 +2127,11 @@ bool initiateClient(const String &ssid, const String &pass)
       successFlag = 0;
     }
   }
-  programStarted = true;
   if (successFlag)
   {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Sukses tersambung");
     statusBuzzer.off();
     statusBuzzer.on();
     delay(100);
@@ -1992,6 +2145,9 @@ bool initiateClient(const String &ssid, const String &pass)
   }
   else
   {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Gagal tersambung");
     statusBuzzer.off();
     statusBuzzer.on();
     delay(2000);
@@ -1999,6 +2155,7 @@ bool initiateClient(const String &ssid, const String &pass)
     delay(100);
     statusBuzzer.off();
   }
+  programStarted = true;
   return successFlag;
 }
 
