@@ -3,6 +3,12 @@
         "array": "cpp",
         "string": "cpp",
         "cmath": "cpp",
-        "random": "cpp"
+        "random": "cpp",
+        "*.tcc": "cpp",
+        "deque": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "functional": "cpp",
+        "tuple": "cpp"
     }
 }

@@ -215,21 +215,24 @@ byte progTrig[30],
     progAct[30];
 bool progFlag[30];
 
-int lcdScreen = 1,
-    lcdCursor;
+byte lcdScreen = 1,
+     lcdCursor,
+     lcdRowPos;
 bool lcdCursorBlinkFlag,
     lcdCursorBlinkStatus;
 unsigned long lcdCursorBlinkTimer;
 
 // Page 1 dynamics
 // suhu,humid and sp respectively
-float prev_page1_dyn[3];
+float prev_newTemp,
+    prev_newHumid,
+    prev_thermalSetPoint;
 bool prev_wifiStatus;
 
 // Page 2 dynamics
 // 0 is date, 1 is month, 2 is hour, 3 is minute, 4 is second
-byte prev_jdw[5];
-int prev_year;
+// byte prev_jdw[5];
+// int prev_year;
 
 // Page 3 dynamics
 // 0 is pemanas, 1 is pendingin, 2 is out1, 3 is out1, 4 is out2
@@ -237,33 +240,47 @@ bool prev_outStatus[4];
 
 // Page 4 dynamics
 // 0 is tc status, 1 is tc mode
-bool prev_tcStatus[2];
-byte prev_tcOperation;
+bool prev_tcStatus,
+    prev_tcOperation;
+byte prev_tcMode;
 
 // Page 5 dynamics
 bool prev_htMode;
 //BA, BB, KP ,KI ,KD ,DS respectively
-float prev_htParams[6];
+float prev_heaterKp,
+    prev_heaterKi,
+    prev_heaterKd,
+    prev_heaterDs,
+    prev_heaterBa,
+    prev_heaterBb;
 
 // Page 6 dynamics
 bool prev_clMode;
 //BA, BB, KP ,KI ,KD ,DS respectively
-float prev_clParams[6];
+float prev_coolerKp,
+    prev_coolerKi,
+    prev_coolerKd,
+    prev_coolerDs,
+    prev_coolerBa,
+    prev_coolerBb;
+
+char lcdRowBuffer[4][20];
 
 // Page 7 had no dynamics
 
 // Page 8 dynamics
-byte prev_activeProgramCount,
-    prev_activeProgram;
+// byte prev_activeProgramCount,
+//     prev_activeProgram;
 
 // Arbitrary page 9 dynamics
-byte prev_trig,
-    prev_rb1[4],
-    prev_rb2[4],
-    prev_act;
+// byte prev_trig,
+//     prev_rb1[4],
+//     prev_rb2[4],
+//     prev_act;
 
 // cursor dynamics
 byte prev_lcdCursor;
+byte prev_lcdRowPos;
 
 const String freeSketch = String(ESP.getFreeSketchSpace()),
              sketchSize = String(ESP.getSketchSize()),
@@ -1113,6 +1130,7 @@ void lcdTransition(int screen, int progNum)
 {
   lcdScreen = screen;
   lcdCursor = 0;
+  lcdRowPos = 0;
   lcd.clear();
   if (screen == 1)
   {
@@ -1164,13 +1182,20 @@ void lcdTransition(int screen, int progNum)
     lcd.setCursor(0, 0);
     lcd.print(LCD_ARROW);
     lcd.printf("Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
+    sprintf(lcdRowBuffer[0], "Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
     lcd.setCursor(1, 1);
-    lcd.printf("Operasi:%s",
+    lcd.printf("Mode   :%s",
                (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Dual" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Cool" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "Heat" : "");
+    sprintf(lcdRowBuffer[1], "Mode   :%s",
+            (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Dual" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Cool" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "Heat" : "");
     lcd.setCursor(1, 2);
-    lcd.printf("Mode   :%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
+    lcd.printf("Operasi:%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
+    sprintf(lcdRowBuffer[2], "Operasi:%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
     lcd.setCursor(1, 3);
     lcd.print("Opsi Pemanas");
+    sprintf(lcdRowBuffer[3], "Opsi Pemanas");
+    lcd.setCursor(14, 0);
+    lcd.print("Kembali");
   }
   else if (screen == 5)
   {
@@ -1298,9 +1323,230 @@ void lcdTransition(int screen, int progNum)
         lcd.printf("Hingga %02d/%02d/%04d %02d:%02d", todt.day(), todt.month(), todt.year(), todt.hour(), todt.minute());
       }
     }
+    else if (progTrig[progNum] == 5)
+    {
+      lcd.printf("%s", (progRB1[progNum][0] == 1) ? "Output 1" : (progRB1[progNum][0] == 2) ? "Output 2" : (progRB1[progNum][0] == 3) ? "Pemanas" : (progRB1[progNum][0] == 4) ? "Pendingin" : (progRB1[progNum][0] == 5) ? "Thermocontrol" : "null");
+      lcd.setCursor(0, 2);
+      lcd.printf("%s", (progRB2[progNum][0] == 1) ? "Menyala" : (progRB2[progNum][0] == 2) ? "Mati" : "null");
+    }
     lcd.setCursor(0, 3);
     lcd.printf("Aksi:%s", (progAct[progNum] == 1) ? "Ny Out1" : (progAct[progNum] == 2) ? "Ny Out2" : (progAct[progNum] == 3) ? "Ny Pmns" : (progAct[progNum] == 4) ? "Ny Pndn" : (progAct[progNum] == 5) ? "Ny Thco" : (progAct[progNum] == 6) ? "Mt Out1" : (progAct[progNum] == 7) ? "Mt Out2" : (progAct[progNum] == 8) ? "Mt Pmns" : (progAct[progNum] == 9) ? "Mt Pndn" : (progAct[progNum] == 10) ? "Mt Thco" : "null");
+    lcd.setCursor(12, 0);
+    lcd.printf("Program%02d", progNum + 1);
+    lcd.setCursor(13, 3);
+    lcd.print(LCD_ARROW);
+    lcd.print("Kembali");
   }
+}
+
+void lcdUpdate()
+{
+  if (lcdScreen == 1)
+  {
+    lcd.setCursor(0, 3);
+    lcd.print(LCD_ARROW);
+    if (prev_newTemp != newTemp)
+    {
+      lcd.setCursor(6, 0);
+      lcd.printf("%05.2f", newTemp);
+    }
+    if (prev_newHumid != newHumid)
+    {
+      lcd.setCursor(6, 1);
+      lcd.printf("%05.1f", newHumid);
+    }
+    if (prev_thermalSetPoint != thermalSetPoint)
+    {
+      lcd.setCursor(7, 2);
+      lcd.printf("%05.1f", thermalSetPoint);
+    }
+    if (prev_wifiStatus != isWifiConnected())
+    {
+      lcd.setCursor(14, 0);
+      lcd.printf("%s", (isWifiConnected()) ? "Online" : "Offline");
+    }
+  }
+  else if (lcdScreen == 2)
+  {
+    DateTime now = rtc.now();
+    if (prev_lcdCursor != lcdCursor)
+    {
+      if (lcdCursor == 0)
+        lcd.setCursor(0, 0);
+      else if (lcdCursor == 1)
+        lcd.setCursor(0, 1);
+      else if (lcdCursor == 2)
+        lcd.setCursor(0, 2);
+      else if (lcdCursor == 3)
+        lcd.setCursor(0, 3);
+      else if (lcdCursor == 4)
+        lcd.setCursor(9, 0);
+    }
+    lcd.setCursor(10, 3);
+    lcd.printf("%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+  }
+  else if (lcdScreen == 3)
+  {
+    if (prev_lcdCursor != lcdCursor)
+    {
+      if (lcdCursor == 0)
+        lcd.setCursor(0, 0);
+      else if (lcdCursor == 1)
+        lcd.setCursor(0, 1);
+      else if (lcdCursor == 2)
+        lcd.setCursor(0, 2);
+      else if (lcdCursor == 3)
+        lcd.setCursor(0, 3);
+      else if (lcdCursor == 4)
+        lcd.setCursor(13, 0);
+    }
+    if (prev_outStatus[0] != bitRead(deviceStatus, BITPOS_HEATER_STATUS))
+    {
+      lcd.setCursor(9, 0);
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == MURUP) ? "ON" : "OFF");
+    }
+    if (prev_outStatus[1] != bitRead(deviceStatus, BITPOS_COOLER_STATUS))
+    {
+      lcd.setCursor(9, 1);
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == MURUP) ? "ON" : "OFF");
+    }
+    if (prev_outStatus[2] != bitRead(deviceStatus, BITPOS_AUX1_STATUS))
+    {
+      lcd.setCursor(9, 2);
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == MURUP) ? "ON" : "OFF");
+    }
+    if (prev_outStatus[3] != bitRead(deviceStatus, BITPOS_AUX2_STATUS))
+    {
+      lcd.setCursor(9, 3);
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == MURUP) ? "ON" : "OFF");
+    }
+  }
+  else if (lcdScreen == 4)
+  {
+
+    byte modeBuffer;
+    bitWrite(modeBuffer, 0, bitRead(deviceStatus, BITPOS_TC_MODE_B0));
+    bitWrite(modeBuffer, 1, bitRead(deviceStatus, BITPOS_TC_MODE_B1));
+    if (prev_tcStatus != bitRead(deviceStatus, BITPOS_TC_STATUS))
+    {
+      lcd.setCursor(9, 0);
+      lcd.print("   ");
+      lcd.setCursor(9, 0);
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
+      if (lcdCursor < 4)
+        sprintf(lcdRowBuffer[0], "Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
+    }
+    if (prev_tcMode != modeBuffer)
+    {
+      lcd.setCursor(9, 1);
+      lcd.printf("%s", (modeBuffer == 3) ? "Dual" : (modeBuffer == 1) ? "Cool" : (modeBuffer == 0) ? "Heat" : "");
+      sprintf(lcdRowBuffer[(lcdCursor < 4) ? 1 : 0], "Mode   :%s", (modeBuffer == 3) ? "Dual" : (modeBuffer == 1) ? "Cool" : (modeBuffer == 0) ? "Heat" : "");
+    }
+    if (prev_tcOperation != bitRead(deviceStatus, BITPOS_TC_OPERATION))
+    {
+      lcd.setCursor(9, 2);
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
+      sprintf(lcdRowBuffer[(lcdCursor < 4) ? 2 : 1], "Operasi:%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
+    }
+
+    if (prev_lcdCursor != lcdCursor)
+    {
+      if (prev_lcdCursor == 3 && lcdCursor == 4 && lcdRowPos == 0)
+      {
+        lcdRowPos = 1;
+        memcpy(&lcdRowBuffer[0], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
+        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
+        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[3], sizeof lcdRowBuffer[3]);
+        sprintf(lcdRowBuffer[3], "Opsi Pendingin");
+        lcd.setCursor(1, 0);
+        lcd.print(lcdRowBuffer[0]);
+        lcd.setCursor(1, 1);
+        lcd.print(lcdRowBuffer[1]);
+        lcd.setCursor(1, 2);
+        lcd.print(lcdRowBuffer[2]);
+        lcd.setCursor(1, 3);
+        lcd.print(lcdRowBuffer[3]);
+        lcd.setCursor(14, 0);
+        lcd.print("Kembali");
+      }
+      else if (prev_lcdCursor == 1 && lcdCursor == 0 && lcdRowPos == 1)
+      {
+        lcdRowPos = 0;
+        memcpy(&lcdRowBuffer[3], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
+        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
+        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[0], sizeof lcdRowBuffer[0]);
+        sprintf(lcdRowBuffer[0], "Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
+        lcd.setCursor(1, 0);
+        lcd.print(lcdRowBuffer[0]);
+        lcd.setCursor(1, 1);
+        lcd.print(lcdRowBuffer[1]);
+        lcd.setCursor(1, 2);
+        lcd.print(lcdRowBuffer[2]);
+        lcd.setCursor(1, 3);
+        lcd.print(lcdRowBuffer[3]);
+        lcd.setCursor(14, 0);
+        lcd.print("Kembali");
+      }
+      if (lcdCursor == 5)
+        lcd.setCursor(13, 0);
+      else if (lcdCursor == 4)
+        lcd.setCursor(0, 3);
+      else if (lcdCursor == 3)
+        lcd.setCursor(0, 3 - lcdRowPos);
+      else if (lcdCursor == 2)
+        lcd.setCursor(0, 2 - lcdRowPos);
+      else if (lcdCursor == 1)
+        lcd.setCursor(0, 1 - lcdRowPos);
+      else if (lcdCursor == 0)
+        lcd.setCursor(0, 0);
+      lcd.print(LCD_ARROW);
+    }
+  }
+  else if (lcdScreen == 5)
+  {
+  }
+  else if (lcdScreen == 6)
+  {
+  }
+  else if (lcdScreen == 7)
+  {
+  }
+  else if (lcdScreen == 8)
+  {
+  }
+  else if (lcdScreen == 9)
+  {
+  }
+
+  prev_newTemp = newTemp;
+  prev_newHumid = newHumid;
+  prev_thermalSetPoint = thermalSetPoint;
+  prev_wifiStatus = isWifiConnected();
+
+  prev_outStatus[0] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
+  prev_outStatus[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
+  prev_outStatus[2] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
+  prev_outStatus[3] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
+
+  prev_tcStatus = bitRead(deviceStatus, BITPOS_TC_STATUS);
+  prev_tcOperation = bitRead(deviceStatus, BITPOS_TC_OPERATION);
+  bitWrite(prev_tcMode, 0, bitRead(deviceStatus, BITPOS_TC_MODE_B0));
+  bitWrite(prev_tcMode, 1, bitRead(deviceStatus, BITPOS_TC_MODE_B1));
+
+  prev_clMode = bitRead(htclMode, BITPOS_COOLER_MODE);
+  prev_coolerKp = coolerKp;
+  prev_coolerKi = coolerKi;
+  prev_coolerKd = coolerKd;
+  prev_coolerDs = coolerDs;
+  prev_coolerBa = coolerBa;
+  prev_coolerBb = coolerBb;
+  prev_htMode = bitRead(htclMode, BITPOS_HEATER_MODE);
+  prev_heaterKp = heaterKp;
+  prev_heaterKi = heaterKi;
+  prev_heaterKd = heaterKd;
+  prev_heaterDs = heaterDs;
+  prev_heaterBa = heaterBa;
+  prev_heaterBb = heaterBb;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
