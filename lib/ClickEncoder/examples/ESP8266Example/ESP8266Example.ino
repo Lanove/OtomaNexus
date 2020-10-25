@@ -26,7 +26,7 @@ void setup() {
   // this is to maintain backward compatibility with an old version of the library
   // This version can have the button on pin zero, and this call enables the feature.
   // in this version best to use pin -1 instead of 0 to disable button functions
-  encoder.setButtonOnPinZeroEnabled(true);
+  // encoder.setButtonOnPinZeroEnabled(true);
 
 }
 

@@ -7,6 +7,9 @@
 #define SENSOR_UPDATE_INTERVAL 1000
 #define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
 
+#define LCD_ARROW (char)B01111110
+#define LCD_DEGREE (char)223
+
 #define MURUP 1 // BEN GA BINGUNG, FOR SOME REASON, INVERTING OUTPUT CAUSES OSCILLATING
 #define MATI 0
 
@@ -34,8 +37,8 @@
 #define LATCH595 2
 #define CLOCK595 0
 
-#define ENCODER_PINA 16
-#define ENCODER_PINB 14
+#define ENCODER_PINA 14
+#define ENCODER_PINB 16
 #define ENCODER_BTN 12
 
 #define ENCODER_STEPS_PER_NOTCH 4 // Change this depending on which encoder is used

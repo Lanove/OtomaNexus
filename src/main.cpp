@@ -121,6 +121,9 @@ void programScan(void);
 void encoderInit();
 void encoderUpdate(bool &direction, uint8_t &buttonstate, int16_t &encvalue, int16_t &delta);
 void encoderService();
+void lcdSetup();
+void lcdTransition(int screen, int progNum = 0);
+void lcdUpdate();
 
 HTTPClient http;
 WiFiClient client;
@@ -212,6 +215,56 @@ byte progTrig[30],
     progAct[30];
 bool progFlag[30];
 
+int lcdScreen = 1,
+    lcdCursor;
+bool lcdCursorBlinkFlag,
+    lcdCursorBlinkStatus;
+unsigned long lcdCursorBlinkTimer;
+
+// Page 1 dynamics
+// suhu,humid and sp respectively
+float prev_page1_dyn[3];
+bool prev_wifiStatus;
+
+// Page 2 dynamics
+// 0 is date, 1 is month, 2 is hour, 3 is minute, 4 is second
+byte prev_jdw[5];
+int prev_year;
+
+// Page 3 dynamics
+// 0 is pemanas, 1 is pendingin, 2 is out1, 3 is out1, 4 is out2
+bool prev_outStatus[4];
+
+// Page 4 dynamics
+// 0 is tc status, 1 is tc mode
+bool prev_tcStatus[2];
+byte prev_tcOperation;
+
+// Page 5 dynamics
+bool prev_htMode;
+//BA, BB, KP ,KI ,KD ,DS respectively
+float prev_htParams[6];
+
+// Page 6 dynamics
+bool prev_clMode;
+//BA, BB, KP ,KI ,KD ,DS respectively
+float prev_clParams[6];
+
+// Page 7 had no dynamics
+
+// Page 8 dynamics
+byte prev_activeProgramCount,
+    prev_activeProgram;
+
+// Arbitrary page 9 dynamics
+byte prev_trig,
+    prev_rb1[4],
+    prev_rb2[4],
+    prev_act;
+
+// cursor dynamics
+byte prev_lcdCursor;
+
 const String freeSketch = String(ESP.getFreeSketchSpace()),
              sketchSize = String(ESP.getSketchSize()),
              chipSize = String(ESP.getFlashChipSize()),
@@ -261,7 +314,6 @@ void setup(void)
   delay(100);
   lcd.begin();
   encoderInit();
-  lcd.print("Hello, world!");
   dht.begin();
   loadInfo();
 
@@ -815,12 +867,15 @@ uint8_t uselessNumberParser(uint8_t progAct)
   return 0;
 }
 
-uint32_t ddd;
 void programScan(void)
 {
   if (programStarted)
   {
     encoderUpdate(dir, bs, ev, dt); //
+    if (dt != 0)
+      Serial.printf("Encoder Value %d\n", ev);
+    if (bs == ENC_CLICKED || bs == ENC_DBCLICKED)
+      Serial.printf("buttonState %s\n", (bs == ENC_CLICKED) ? "CLICKED" : (bs == ENC_DBCLICKED) ? "DBCLICKED" : "SMTH ELSE");
     statusLED.update();
     statusBuzzer.update();
     bool statusBuffer[10];
@@ -1041,31 +1096,214 @@ void programScan(void)
   }
   if (millis() - lcdUpdateMillis >= LCD_UPDATE_INTERVAL)
   {
-    ddd++;
-    lcd.setCursor(0, 1);
-    lcd.print(ddd);
-    lcd.setCursor(0, 2);
-    lcd.print(ev);
-    lcd.setCursor(0, 3);
-    if (b != ClickEncoder::Open)
-    {
-      Serial.print("Button: ");
-#define VERBOSECASE(label) \
-  case label:              \
-    lcd.print(#label);     \
-    break;
-      switch (b)
-      {
-        VERBOSECASE(ClickEncoder::Pressed);
-        VERBOSECASE(ClickEncoder::Held)
-        VERBOSECASE(ClickEncoder::Released)
-        VERBOSECASE(ClickEncoder::Clicked)
-        VERBOSECASE(ClickEncoder::DoubleClicked)
-      }
-    }
     lcdUpdateMillis = millis();
   }
 }
+
+/////////////////////////////////////////// LCD API ///////////////////////////////////////////////
+
+void lcdSetup()
+{
+  lcd.begin();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+}
+
+void lcdTransition(int screen, int progNum)
+{
+  lcdScreen = screen;
+  lcdCursor = 0;
+  lcd.clear();
+  if (screen == 1)
+  {
+    lcd.setCursor(1, 0);
+    lcd.printf("Suhu:%05.2f", newTemp);
+    lcd.print(LCD_DEGREE); // print [degree] character
+    lcd.print("C");
+    lcd.setCursor(14, 0);
+    lcd.printf("%s", (isWifiConnected()) ? "ONLINE" : "OFFLINE");
+    lcd.setCursor(1, 1);
+    lcd.printf("Hmdt:%05.1f%%", newHumid);
+    lcd.setCursor(0, 2);
+    lcd.print(LCD_ARROW);
+    lcd.printf("SP  : %04.1f");
+    lcd.print(LCD_DEGREE); // print [degree] character
+    lcd.print("C");
+    lcd.setCursor(1, 3);
+    lcd.print("Kembali");
+  }
+  else if (screen == 2)
+  {
+    DateTime now = rtc.now();
+    lcd.setCursor(0, 0);
+    lcd.print(LCD_ARROW);
+    lcd.printf("Output   Kembali");
+    lcd.setCursor(1, 1);
+    lcd.printf("Therco");
+    lcd.setCursor(1, 2);
+    lcd.printf("Program  %02d:%02d:%04d", now.day(), now.month(), now.year());
+    lcd.setCursor(1, 3);
+    lcd.printf("Info     %02d:%02d:%02d", now.hour(), now.minute(), now.second());
+  }
+  else if (screen == 3)
+  {
+    lcd.setCursor(0, 0);
+    lcd.print(LCD_ARROW);
+    lcd.printf("Pemanas:%s", (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == MURUP) ? "ON" : "OFF");
+    lcd.setCursor(14, 0);
+    lcd.print("Kembali");
+    lcd.setCursor(1, 1);
+    lcd.printf("Pendingin:%s", (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == MURUP) ? "ON" : "OFF");
+    lcd.setCursor(1, 2);
+    lcd.printf("Output 1:%s", (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == MURUP) ? "ON" : "OFF");
+    lcd.setCursor(1, 3);
+    lcd.printf("Output 2:%s", (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == MURUP) ? "ON" : "OFF");
+  }
+  else if (screen == 4)
+  {
+    lcd.setCursor(0, 0);
+    lcd.print(LCD_ARROW);
+    lcd.printf("Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
+    lcd.setCursor(1, 1);
+    lcd.printf("Operasi:%s",
+               (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Dual" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Cool" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "Heat" : "");
+    lcd.setCursor(1, 2);
+    lcd.printf("Mode   :%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
+    lcd.setCursor(1, 3);
+    lcd.print("Opsi Pemanas");
+  }
+  else if (screen == 5)
+  {
+    lcd.setCursor(0, 0);
+    lcd.print("Pemanas       Kembali");
+    lcd.setCursor(0, 1);
+    lcd.print(LCD_ARROW);
+    lcd.printf("Mode:%s", (bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID) ? "PID" : "HYS");
+    lcd.setCursor(1, 2);
+    lcd.printf("Bts Ats:%05.2f", heaterBa);
+    lcd.setCursor(1, 3);
+    lcd.printf("Bts Bwh:%05.2f", heaterBb);
+  }
+  else if (screen == 6)
+  {
+    lcd.setCursor(0, 0);
+    lcd.print("Pendingin     Kembali");
+    lcd.setCursor(0, 1);
+    lcd.print(LCD_ARROW);
+    lcd.printf("Mode:%s", (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
+    lcd.setCursor(1, 2);
+    lcd.printf("Bts Ats:%05.2f", coolerBa);
+    lcd.setCursor(1, 3);
+    lcd.printf("Bts Bwh:%05.2f", coolerBb);
+  }
+  else if (screen == 7)
+  {
+    lcd.setCursor(1, 0);
+    lcd.printf("Soft AP:%.12s", storedSoftSSID.c_str());
+    lcd.setCursor(1, 1);
+    lcd.printf("Soft PW:%.12s", storedSoftWifiPass.c_str());
+    lcd.setCursor(1, 2);
+    lcd.print("IP:192.168.4.1"); // this guy is the same every esp, so its fine to hardcode
+    lcd.setCursor(1, 3);
+    lcd.printf("Ver:%s     Kembali", BUILD_VERSION);
+  }
+  else if (screen == 8)
+  {
+    byte activeProgCount = 0;
+    byte activeProg[30];
+    for (uint8_t i = 0; i < 30; i++)
+    {
+      if (progTrig[i] != 0)
+      {
+        activeProg[activeProgCount] = i + 1;
+        activeProgCount++;
+      }
+    }
+    if (activeProgCount > 0)
+    {
+      lcd.setCursor(0, 0);
+      lcd.print(LCD_ARROW);
+      if (activeProgCount == 1)
+      {
+        lcd.printf("Program %d", activeProg[0]);
+      }
+      else if (activeProgCount == 2)
+      {
+        lcd.printf("Program %d", activeProg[0]);
+        lcd.setCursor(1, 1);
+        lcd.printf("Program %d", activeProg[1]);
+      }
+      else if (activeProgCount == 3)
+      {
+        lcd.printf("Program %d", activeProg[0]);
+        lcd.setCursor(1, 1);
+        lcd.printf("Program %d", activeProg[1]);
+        lcd.setCursor(1, 2);
+        lcd.printf("Program %d", activeProg[2]);
+      }
+      else if (activeProgCount >= 4)
+      {
+        lcd.printf("Program %d", activeProg[0]);
+        lcd.setCursor(1, 1);
+        lcd.printf("Program %d", activeProg[1]);
+        lcd.setCursor(1, 2);
+        lcd.printf("Program %d", activeProg[2]);
+        lcd.setCursor(1, 3);
+        lcd.printf("Program %d", activeProg[3]);
+      }
+      lcd.setCursor(11, 0);
+      lcd.print("Kembali");
+    }
+    else
+    {
+      lcd.setCursor(11, 0);
+      lcd.print(LCD_ARROW);
+      lcd.setCursor(0, 0);
+      lcd.print("Tidak ada");
+      lcd.setCursor(0, 1);
+      lcd.print("program");
+    }
+  }
+  else if (screen == 9)
+  {
+    lcd.setCursor(0, 0);
+    lcd.printf("Pemicu:%s", (progTrig[progNum] == 1) ? "Suhu" : (progTrig[progNum] == 2) ? "Hmdt" : (progTrig[progNum] == 3) ? "Jdwl" : (progTrig[progNum] == 4) ? "TglW" : (progTrig[progNum] == 5) ? "Kead" : "null");
+    lcd.setCursor(0, 1);
+    if (progTrig[progNum] == 1 || progTrig[progNum] == 2)
+    {
+      lcd.printf("%s", (progRB1[progNum][0] == 0) ? "<" : (progRB1[progNum][0] == 1) ? ">" : (progRB1[progNum][0] == 2) ? "<=" : (progRB1[progNum][0] == 3) ? ">=" : "null");
+      lcd.setCursor(0, 2);
+      float copyValue;
+      memcpy(&copyValue, &progRB2[progNum], sizeof(float));
+      lcd.printf("%05.1f", copyValue);
+    }
+    else if (progTrig[progNum] == 3 || progTrig[progNum] == 4)
+    {
+      unsigned long fromCopy;
+      unsigned long toCopy;
+      memcpy(&fromCopy, &progRB1[progNum], sizeof(unsigned long));
+      memcpy(&toCopy, &progRB1[progNum], sizeof(unsigned long));
+      if (progTrig[progNum] == 3)
+      {
+        lcd.printf("Dari %02d:%02d:%02d", fromCopy / 3600, (fromCopy % 3600) / 60, fromCopy % 60);
+        lcd.setCursor(0, 2);
+        lcd.printf("Hingga %02d:%02d:%02d", toCopy / 3600, (toCopy % 3600) / 60, toCopy % 60);
+      }
+      else
+      {
+        DateTime fromdt((uint32_t)fromCopy);
+        DateTime todt((uint32_t)toCopy);
+        lcd.printf("Dari %02d/%02d/%04d %02d:%02d", fromdt.day(), fromdt.month(), fromdt.year(), fromdt.hour(), fromdt.minute());
+        lcd.setCursor(0, 2);
+        lcd.printf("Hingga %02d/%02d/%04d %02d:%02d", todt.day(), todt.month(), todt.year(), todt.hour(), todt.minute());
+      }
+    }
+    lcd.setCursor(0, 3);
+    lcd.printf("Aksi:%s", (progAct[progNum] == 1) ? "Ny Out1" : (progAct[progNum] == 2) ? "Ny Out2" : (progAct[progNum] == 3) ? "Ny Pmns" : (progAct[progNum] == 4) ? "Ny Pndn" : (progAct[progNum] == 5) ? "Ny Thco" : (progAct[progNum] == 6) ? "Mt Out1" : (progAct[progNum] == 7) ? "Mt Out2" : (progAct[progNum] == 8) ? "Mt Pmns" : (progAct[progNum] == 9) ? "Mt Pndn" : (progAct[progNum] == 10) ? "Mt Thco" : "null");
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 ////////////// ENCODER API /////////////////
 void encoderInit()
