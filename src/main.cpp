@@ -951,6 +951,8 @@ void programScan(void)
         encUpperLimit = 4;
       else if (lcdScreen == 4)
         encUpperLimit = 5;
+      else if (lcdScreen == 6 || lcdScreen == 5)
+        encUpperLimit = 7;
 
       if (lcdCursor < encLowerLimit)
         lcdCursor = encLowerLimit;
@@ -994,12 +996,12 @@ void programScan(void)
       else if (lcdScreen == 5)
       {
         if (lcdCursor == 7)
-          lcdTransition(2);
+          lcdTransition(4);
       }
       else if (lcdScreen == 6)
       {
         if (lcdCursor == 7)
-          lcdTransition(2);
+          lcdTransition(4);
       }
       else if (lcdScreen == 7)
         lcdTransition(2);
@@ -1260,7 +1262,7 @@ void lcdTransition(int screen, int progNum)
     lcd.print(LCD_DEGREE); // print [degree] character
     lcd.print("C");
     lcd.setCursor(14, 0);
-    lcd.printf("%s", (isWifiConnected()) ? "ONLINE" : "OFFLINE");
+    lcd.printf("%s", (isWifiConnected()) ? "ONL" : "OFFL");
     lcd.setCursor(1, 1);
     lcd.printf("Hmdt:%05.1f%%", newHumid);
     lcd.setCursor(1, 2);
@@ -1318,29 +1320,22 @@ void lcdTransition(int screen, int progNum)
     lcd.setCursor(16, 0);
     lcd.print("Back");
   }
-  else if (screen == 5)
+  else if (screen == 5 || screen == 6)
   {
+    lcdCursorBackPos = 7;
     lcd.setCursor(0, 0);
-    lcd.print("Pemanas         Back");
+    lcd.print((screen == 5) ? "Pemanas         Back" : "Pendingin       Back");
+    sprintf(lcdRowBuffer[0], (screen == 5) ? "Pemanas         Back" : "Pendingin       Back");
     lcd.setCursor(0, 1);
     lcd.print(LCD_ARROW);
-    lcd.printf("Mode:%s", (bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID) ? "PID" : "HYS");
+    lcd.printf("Mode:%s", (bitRead(htclMode, (screen == 5) ? BITPOS_HEATER_MODE : BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
+    sprintf(lcdRowBuffer[1], "Mode:%s", (bitRead(htclMode, (screen == 5) ? BITPOS_HEATER_MODE : BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
     lcd.setCursor(1, 2);
-    lcd.printf("Bts Ats:%05.2f", heaterBa);
+    lcd.printf("Bts Ats:%05.2f", (screen == 5) ? heaterBa : coolerBa);
+    sprintf(lcdRowBuffer[2], "Bts Ats:%05.2f", (screen == 5) ? heaterBa : coolerBa);
     lcd.setCursor(1, 3);
-    lcd.printf("Bts Bwh:%05.2f", heaterBb);
-  }
-  else if (screen == 6)
-  {
-    lcd.setCursor(0, 0);
-    lcd.print("Pendingin       Back");
-    lcd.setCursor(0, 1);
-    lcd.print(LCD_ARROW);
-    lcd.printf("Mode:%s", (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
-    lcd.setCursor(1, 2);
-    lcd.printf("Bts Ats:%05.2f", coolerBa);
-    lcd.setCursor(1, 3);
-    lcd.printf("Bts Bwh:%05.2f", coolerBb);
+    lcd.printf("Bts Bwh:%05.2f", (screen == 5) ? heaterBb : coolerBb);
+    sprintf(lcdRowBuffer[3], "Bts Bwh:%05.2f", (screen == 5) ? heaterBb : coolerBb);
   }
   else if (screen == 7)
   {
@@ -1352,7 +1347,8 @@ void lcdTransition(int screen, int progNum)
     lcd.print("IP:192.168.4.1"); // this guy is the same every esp, so its fine to hardcode
     lcd.setCursor(0, 3);
     lcd.printf("Ver:%s", BUILD_VERSION);
-    lcd.setCursor(16, 3);
+    lcd.setCursor(15, 3);
+    lcd.print(LCD_ARROW);
     lcd.print("Back");
   }
   else if (screen == 8)
@@ -1663,25 +1659,25 @@ void lcdUpdate()
       lcd.print(LCD_ARROW);
     }
   }
-  else if (lcdScreen == 5)
+  else if (lcdScreen == 5 || lcdScreen == 6)
   {
     if (prev_lcdCursor != lcdCursor)
     {
-      if (prev_lcdCursor == 3 + lcdRowPos && lcdCursor == 4 + lcdRowPos)
+      if (prev_lcdCursor == 2 + lcdRowPos && lcdCursor == 3 + lcdRowPos && lcdCursor != lcdCursorBackPos)
       { // Scroll down
         lcdRowPos++;
         lcd.clear();
         memcpy(&lcdRowBuffer[0], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
         memcpy(&lcdRowBuffer[1], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
         memcpy(&lcdRowBuffer[2], &lcdRowBuffer[3], sizeof lcdRowBuffer[3]);
-        if (lcdCursor == 1)
-          sprintf(lcdRowBuffer[3], "Kp:%05.2f", heaterKp);
-        else if (lcdCursor == 2)
-          sprintf(lcdRowBuffer[3], "Ki:%05.2f", heaterKi);
-        else if (lcdCursor == 3)
-          sprintf(lcdRowBuffer[3], "Kd:%05.2f", heaterKd);
-        else if (lcdCursor == 4)
-          sprintf(lcdRowBuffer[3], "Durasi:%05.0f ms", heaterDs);
+        if (lcdRowPos == 1)
+          sprintf(lcdRowBuffer[3], "Kp:%05.2f", (lcdScreen == 5) ? heaterKp : coolerKp);
+        else if (lcdRowPos == 2)
+          sprintf(lcdRowBuffer[3], "Ki:%05.2f", (lcdScreen == 5) ? heaterKi : coolerKi);
+        else if (lcdRowPos == 3)
+          sprintf(lcdRowBuffer[3], "Kd:%05.2f", (lcdScreen == 5) ? heaterKd : coolerKd);
+        else if (lcdRowPos == 4)
+          sprintf(lcdRowBuffer[3], "Durasi:%04.0f ms", (lcdScreen == 5) ? heaterDs : coolerDs);
         lcd.setCursor(1, 0);
         lcd.print(lcdRowBuffer[0]);
         lcd.setCursor(1, 1);
@@ -1700,27 +1696,30 @@ void lcdUpdate()
         memcpy(&lcdRowBuffer[3], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
         memcpy(&lcdRowBuffer[2], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
         memcpy(&lcdRowBuffer[1], &lcdRowBuffer[0], sizeof lcdRowBuffer[0]);
-        if (lcdCursor == 0)
-          sprintf(lcdRowBuffer[0], "Pemanas");
-        else if (lcdCursor == 1)
-          sprintf(lcdRowBuffer[0], " Mode:%s", (bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID) ? "PID" : "HYS");
-        else if (lcdCursor == 2)
-          sprintf(lcdRowBuffer[0], " Bts Ats:%05.2f", heaterBa);
-        else if (lcdCursor == 3)
-          sprintf(lcdRowBuffer[0], " Bts Bwh:%05.2f", heaterBb);
-        lcd.setCursor(0, 0);
+        if (lcdRowPos == 0)
+          sprintf(lcdRowBuffer[0], (lcdScreen == 5) ? "Pemanas" : "Pendingin");
+        else if (lcdRowPos == 1)
+          sprintf(lcdRowBuffer[0], "Mode:%s", (bitRead(htclMode, (lcdScreen == 5) ? BITPOS_HEATER_MODE : BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
+        else if (lcdRowPos == 2)
+          sprintf(lcdRowBuffer[0], "Bts Ats:%05.2f", (lcdScreen == 5) ? heaterBa : coolerBa);
+        else if (lcdRowPos == 3)
+          sprintf(lcdRowBuffer[0], "Bts Bwh:%05.2f", (lcdScreen == 5) ? heaterBb : coolerBb);
+        lcd.setCursor((strcmp(lcdRowBuffer[0], (lcdScreen == 5) ? "Pemanas" : "Pendingin") == 0) ? 0 : 1, 0);
         lcd.print(lcdRowBuffer[0]);
-        lcd.setCursor(0, 1);
+        lcd.setCursor(1, 1);
         lcd.print(lcdRowBuffer[1]);
-        lcd.setCursor(0, 2);
+        lcd.setCursor(1, 2);
         lcd.print(lcdRowBuffer[2]);
-        lcd.setCursor(0, 3);
+        lcd.setCursor(1, 3);
         lcd.print(lcdRowBuffer[3]);
         lcd.setCursor(16, 0);
         lcd.print("Back");
       }
-      lcd.setCursor(0, 0);
-      lcd.print(" ");
+      if (lcdRowPos != 0)
+      {
+        lcd.setCursor(0, 0);
+        lcd.print(" ");
+      }
       lcd.setCursor(0, 1);
       lcd.print(" ");
       lcd.setCursor(0, 2);
@@ -1730,7 +1729,7 @@ void lcdUpdate()
       lcd.setCursor(15, 0);
       lcd.print(" ");
       if (lcdCursor != lcdCursorBackPos)
-        lcd.setCursor(0, lcdCursor - lcdRowPos);
+        lcd.setCursor(0, lcdCursor - lcdRowPos + 1);
       else
         lcd.setCursor(15, 0);
       lcd.print(LCD_ARROW);
@@ -2182,6 +2181,7 @@ bool initiateSoftAP()
   statusBuzzer.off();
   delay(500);
   statusBuzzer.off();
+  lcd.clear();
   return timeOutFlag;
 }
 
@@ -2251,6 +2251,7 @@ bool initiateClient(const String &ssid, const String &pass)
     delay(100);
     statusBuzzer.off();
   }
+  lcd.clear();
   programStarted = true;
   return successFlag;
 }
