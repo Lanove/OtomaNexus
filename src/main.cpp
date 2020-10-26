@@ -222,6 +222,14 @@ int lcdScreen = 1,
 bool lcdCursorBlinkFlag,
     lcdCursorBlinkStatus;
 unsigned long lcdCursorBlinkTimer;
+bool encSelecting;
+byte encSelectorCounter;
+unsigned long encSelectorTimer;
+int encUpperLimit;
+const int encLowerLimit = 0;
+unsigned long screen2millis;
+byte activeProgCount = 0;
+byte activeProg[30];
 
 // Page 1 dynamics
 // suhu,humid and sp respectively
@@ -649,6 +657,8 @@ void loop(void)
               Serial.println("order exist!");
               if (strcmp(order, "setParam") == 0)
               {
+                statusBuzzer.setInterval(300);
+                statusBuzzer.disableAfter(301);
                 Serial.println(order);
                 byte *buffer = (byte *)malloc(4);
 
@@ -910,12 +920,6 @@ uint8_t uselessNumberParser(uint8_t progAct)
   return 0;
 }
 
-bool encSelecting;
-byte encSelectorCounter;
-unsigned long encSelectorTimer;
-int encUpperLimit;
-const int encLowerLimit = 0;
-
 void programScan(void)
 {
   if (programStarted)
@@ -1008,12 +1012,12 @@ void programScan(void)
       else if (lcdScreen == 8)
       {
         if (lcdCursor < 30 && lcdCursorBackPos != lcdCursor)
-          lcdTransition(9, lcdCursor);
+          lcdTransition(9, activeProg[lcdCursor] - 1);
         if (lcdCursorBackPos == lcdCursor)
-          lcdTransition(2, lcdCursor);
+          lcdTransition(2);
       }
       else if (lcdScreen == 9)
-        lcdTransition(2);
+        lcdTransition(8);
     }
 
     if (dt != 0)
@@ -1353,8 +1357,8 @@ void lcdTransition(int screen, int progNum)
   }
   else if (screen == 8)
   {
-    byte activeProgCount = 0;
-    byte activeProg[30];
+    activeProgCount = 0;
+    std::fill_n(activeProg, 30, 0);
     for (uint8_t i = 0; i < 30; i++)
     {
       if (progTrig[i] != 0)
@@ -1363,8 +1367,11 @@ void lcdTransition(int screen, int progNum)
         activeProgCount++;
       }
     }
+
     if (activeProgCount > 0)
     {
+      encUpperLimit = activeProgCount;
+      lcdCursorBackPos = activeProgCount;
       lcd.setCursor(0, 0);
       lcd.print(LCD_ARROW);
       if (activeProgCount == 1)
@@ -1388,16 +1395,22 @@ void lcdTransition(int screen, int progNum)
       else if (activeProgCount >= 4)
       {
         lcd.printf("Program %d", activeProg[0]);
+        sprintf(lcdRowBuffer[0], "Program %d", activeProg[0]);
         lcd.setCursor(1, 1);
         lcd.printf("Program %d", activeProg[1]);
+        sprintf(lcdRowBuffer[1], "Program %d", activeProg[1]);
         lcd.setCursor(1, 2);
         lcd.printf("Program %d", activeProg[2]);
+        sprintf(lcdRowBuffer[2], "Program %d", activeProg[2]);
         lcd.setCursor(1, 3);
         lcd.printf("Program %d", activeProg[3]);
+        sprintf(lcdRowBuffer[3], "Program %d", activeProg[3]);
       }
     }
     else
     {
+      lcdCursorBackPos = 0;
+      encUpperLimit = 0;
       lcd.setCursor(11, 0);
       lcd.print(LCD_ARROW);
       lcd.setCursor(0, 0);
@@ -1411,12 +1424,12 @@ void lcdTransition(int screen, int progNum)
   else if (screen == 9)
   {
     lcd.setCursor(0, 0);
-    lcd.printf("Pemicu:%s", (progTrig[progNum] == 1) ? "Suhu" : (progTrig[progNum] == 2) ? "Hmdt" : (progTrig[progNum] == 3) ? "Jdwl" : (progTrig[progNum] == 4) ? "TglW" : (progTrig[progNum] == 5) ? "Kead" : "null");
+    lcd.printf("Pemicu:%s", (progTrig[progNum] == 1) ? "Suhu" : (progTrig[progNum] == 2) ? "Humidts" : (progTrig[progNum] == 3) ? "Jdwlhrn" : (progTrig[progNum] == 4) ? "TglWktu" : (progTrig[progNum] == 5) ? "Keadaan" : "null");
     lcd.setCursor(0, 1);
     if (progTrig[progNum] == 1 || progTrig[progNum] == 2)
     {
       lcd.printf("%s", (progRB1[progNum][0] == 0) ? "<" : (progRB1[progNum][0] == 1) ? ">" : (progRB1[progNum][0] == 2) ? "<=" : (progRB1[progNum][0] == 3) ? ">=" : "null");
-      lcd.setCursor(0, 2);
+      lcd.print(" ");
       float copyValue;
       memcpy(&copyValue, &progRB2[progNum], sizeof(float));
       lcd.printf("%05.1f", copyValue);
@@ -1426,7 +1439,7 @@ void lcdTransition(int screen, int progNum)
       unsigned long fromCopy;
       unsigned long toCopy;
       memcpy(&fromCopy, &progRB1[progNum], sizeof(unsigned long));
-      memcpy(&toCopy, &progRB1[progNum], sizeof(unsigned long));
+      memcpy(&toCopy, &progRB2[progNum], sizeof(unsigned long));
       if (progTrig[progNum] == 3)
       {
         lcd.printf("Dari %02d:%02d:%02d", fromCopy / 3600, (fromCopy % 3600) / 60, fromCopy % 60);
@@ -1437,9 +1450,9 @@ void lcdTransition(int screen, int progNum)
       {
         DateTime fromdt((uint32_t)fromCopy);
         DateTime todt((uint32_t)toCopy);
-        lcd.printf("Dari %02d/%02d/%04d %02d:%02d", fromdt.day(), fromdt.month(), fromdt.year(), fromdt.hour(), fromdt.minute());
+        lcd.printf("%02d/%02d/%04d %02d:%02d", fromdt.day(), fromdt.month(), fromdt.year(), fromdt.hour(), fromdt.minute());
         lcd.setCursor(0, 2);
-        lcd.printf("Hingga %02d/%02d/%04d %02d:%02d", todt.day(), todt.month(), todt.year(), todt.hour(), todt.minute());
+        lcd.printf("%02d/%02d/%04d %02d:%02d", todt.day(), todt.month(), todt.year(), todt.hour(), todt.minute());
       }
     }
     else if (progTrig[progNum] == 5)
@@ -1452,13 +1465,12 @@ void lcdTransition(int screen, int progNum)
     lcd.printf("Aksi:%s", (progAct[progNum] == 1) ? "Ny Out1" : (progAct[progNum] == 2) ? "Ny Out2" : (progAct[progNum] == 3) ? "Ny Pmns" : (progAct[progNum] == 4) ? "Ny Pndn" : (progAct[progNum] == 5) ? "Ny Thco" : (progAct[progNum] == 6) ? "Mt Out1" : (progAct[progNum] == 7) ? "Mt Out2" : (progAct[progNum] == 8) ? "Mt Pmns" : (progAct[progNum] == 9) ? "Mt Pndn" : (progAct[progNum] == 10) ? "Mt Thco" : "null");
     lcd.setCursor(15, 0);
     lcd.printf("PRG%02d", progNum + 1);
-    lcd.setCursor(16, 3);
+    lcd.setCursor(15, 3);
     lcd.print(LCD_ARROW);
     lcd.print("Back");
   }
 }
 
-unsigned long screen2millis;
 void lcdUpdate()
 {
   if (lcdScreen == 1)
@@ -1715,6 +1727,7 @@ void lcdUpdate()
         lcd.setCursor(16, 0);
         lcd.print("Back");
       }
+
       if (lcdRowPos != 0)
       {
         lcd.setCursor(0, 0);
@@ -1735,17 +1748,65 @@ void lcdUpdate()
       lcd.print(LCD_ARROW);
     }
   }
-  else if (lcdScreen == 6)
-  {
-  }
-  else if (lcdScreen == 7)
-  {
-  }
   else if (lcdScreen == 8)
   {
-  }
-  else if (lcdScreen == 9)
-  {
+    if (prev_lcdCursor != lcdCursor)
+    {
+      if (prev_lcdCursor == 3 + lcdRowPos && lcdCursor == 4 + lcdRowPos && lcdCursor != lcdCursorBackPos)
+      { // Scroll down
+        lcdRowPos++;
+        lcd.clear();
+        memcpy(&lcdRowBuffer[0], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
+        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
+        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[3], sizeof lcdRowBuffer[3]);
+        sprintf(lcdRowBuffer[3], "Program %d", (uint8_t)activeProg[lcdCursor]);
+        lcd.setCursor(1, 0);
+        lcd.print(lcdRowBuffer[0]);
+        lcd.setCursor(1, 1);
+        lcd.print(lcdRowBuffer[1]);
+        lcd.setCursor(1, 2);
+        lcd.print(lcdRowBuffer[2]);
+        lcd.setCursor(1, 3);
+        lcd.print(lcdRowBuffer[3]);
+        lcd.setCursor(16, 0);
+        lcd.print("Back");
+      }
+      if (prev_lcdCursor == lcdRowPos && lcdCursor == lcdRowPos - 1 && lcdRowPos != 0)
+      {
+        lcdRowPos--;
+        lcd.clear();
+        memcpy(&lcdRowBuffer[3], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
+        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
+        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[0], sizeof lcdRowBuffer[0]);
+        sprintf(lcdRowBuffer[0], "Program %d", (uint8_t)activeProg[lcdCursor]);
+        lcd.setCursor(1, 0);
+        lcd.print(lcdRowBuffer[0]);
+        lcd.setCursor(1, 1);
+        lcd.print(lcdRowBuffer[1]);
+        lcd.setCursor(1, 2);
+        lcd.print(lcdRowBuffer[2]);
+        lcd.setCursor(1, 3);
+        lcd.print(lcdRowBuffer[3]);
+        lcd.setCursor(16, 0);
+        lcd.print("Back");
+      }
+
+      lcd.setCursor(0, 0);
+      lcd.print(" ");
+      lcd.setCursor(0, 1);
+      lcd.print(" ");
+      lcd.setCursor(0, 2);
+      lcd.print(" ");
+      lcd.setCursor(0, 3);
+      lcd.print(" ");
+      lcd.setCursor(15, 0);
+      lcd.print(" ");
+      if (lcdCursor != lcdCursorBackPos)
+        lcd.setCursor(0, lcdCursor - lcdRowPos);
+      else
+        lcd.setCursor(15, 0);
+      lcd.print(LCD_ARROW);
+    }
   }
 
   prev_lcdCursor = lcdCursor;
