@@ -217,7 +217,8 @@ bool progFlag[30];
 
 int lcdScreen = 1,
     lcdCursor,
-    lcdRowPos;
+    lcdRowPos,
+    lcdCursorBackPos;
 bool lcdCursorBlinkFlag,
     lcdCursorBlinkStatus;
 unsigned long lcdCursorBlinkTimer;
@@ -985,7 +986,32 @@ void programScan(void)
       {
         if (lcdCursor == 5)
           lcdTransition(2);
+        if (lcdCursor == 4)
+          lcdTransition(6);
+        if (lcdCursor == 3)
+          lcdTransition(5);
       }
+      else if (lcdScreen == 5)
+      {
+        if (lcdCursor == 7)
+          lcdTransition(2);
+      }
+      else if (lcdScreen == 6)
+      {
+        if (lcdCursor == 7)
+          lcdTransition(2);
+      }
+      else if (lcdScreen == 7)
+        lcdTransition(2);
+      else if (lcdScreen == 8)
+      {
+        if (lcdCursor < 30 && lcdCursorBackPos != lcdCursor)
+          lcdTransition(9, lcdCursor);
+        if (lcdCursorBackPos == lcdCursor)
+          lcdTransition(2, lcdCursor);
+      }
+      else if (lcdScreen == 9)
+        lcdTransition(2);
     }
 
     if (dt != 0)
@@ -1639,6 +1665,76 @@ void lcdUpdate()
   }
   else if (lcdScreen == 5)
   {
+    if (prev_lcdCursor != lcdCursor)
+    {
+      if (prev_lcdCursor == 3 + lcdRowPos && lcdCursor == 4 + lcdRowPos)
+      { // Scroll down
+        lcdRowPos++;
+        lcd.clear();
+        memcpy(&lcdRowBuffer[0], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
+        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
+        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[3], sizeof lcdRowBuffer[3]);
+        if (lcdCursor == 1)
+          sprintf(lcdRowBuffer[3], "Kp:%05.2f", heaterKp);
+        else if (lcdCursor == 2)
+          sprintf(lcdRowBuffer[3], "Ki:%05.2f", heaterKi);
+        else if (lcdCursor == 3)
+          sprintf(lcdRowBuffer[3], "Kd:%05.2f", heaterKd);
+        else if (lcdCursor == 4)
+          sprintf(lcdRowBuffer[3], "Durasi:%05.0f ms", heaterDs);
+        lcd.setCursor(1, 0);
+        lcd.print(lcdRowBuffer[0]);
+        lcd.setCursor(1, 1);
+        lcd.print(lcdRowBuffer[1]);
+        lcd.setCursor(1, 2);
+        lcd.print(lcdRowBuffer[2]);
+        lcd.setCursor(1, 3);
+        lcd.print(lcdRowBuffer[3]);
+        lcd.setCursor(16, 0);
+        lcd.print("Back");
+      }
+      if (prev_lcdCursor == lcdRowPos && lcdCursor == lcdRowPos - 1 && lcdRowPos != 0)
+      {
+        lcdRowPos--;
+        lcd.clear();
+        memcpy(&lcdRowBuffer[3], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
+        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
+        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[0], sizeof lcdRowBuffer[0]);
+        if (lcdCursor == 0)
+          sprintf(lcdRowBuffer[0], "Pemanas");
+        else if (lcdCursor == 1)
+          sprintf(lcdRowBuffer[0], " Mode:%s", (bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID) ? "PID" : "HYS");
+        else if (lcdCursor == 2)
+          sprintf(lcdRowBuffer[0], " Bts Ats:%05.2f", heaterBa);
+        else if (lcdCursor == 3)
+          sprintf(lcdRowBuffer[0], " Bts Bwh:%05.2f", heaterBb);
+        lcd.setCursor(0, 0);
+        lcd.print(lcdRowBuffer[0]);
+        lcd.setCursor(0, 1);
+        lcd.print(lcdRowBuffer[1]);
+        lcd.setCursor(0, 2);
+        lcd.print(lcdRowBuffer[2]);
+        lcd.setCursor(0, 3);
+        lcd.print(lcdRowBuffer[3]);
+        lcd.setCursor(16, 0);
+        lcd.print("Back");
+      }
+      lcd.setCursor(0, 0);
+      lcd.print(" ");
+      lcd.setCursor(0, 1);
+      lcd.print(" ");
+      lcd.setCursor(0, 2);
+      lcd.print(" ");
+      lcd.setCursor(0, 3);
+      lcd.print(" ");
+      lcd.setCursor(15, 0);
+      lcd.print(" ");
+      if (lcdCursor != lcdCursorBackPos)
+        lcd.setCursor(0, lcdCursor - lcdRowPos);
+      else
+        lcd.setCursor(15, 0);
+      lcd.print(LCD_ARROW);
+    }
   }
   else if (lcdScreen == 6)
   {
