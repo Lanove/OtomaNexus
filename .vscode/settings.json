@@ -9,6 +9,8 @@
         "unordered_map": "cpp",
         "vector": "cpp",
         "functional": "cpp",
-        "tuple": "cpp"
+        "tuple": "cpp",
+        "initializer_list": "cpp",
+        "algorithm": "cpp"
     }
 }
