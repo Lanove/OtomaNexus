@@ -60,7 +60,7 @@ Keterangan Pin :
 */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 #include <NTPClient.h>
@@ -126,7 +126,7 @@ void lcdTransition(int screen, int progNum = 0);
 void lcdUpdate();
 
 HTTPClient http;
-WiFiClient client;
+WiFiClientSecure client;
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200); // 25200 for UTC+7, 3600*(UTC)
@@ -312,6 +312,17 @@ void setup(void)
   storedSoftSSID.reserve(32);
   storedSoftWifiPass.reserve(64);
   storedDeviceToken.reserve(10);
+  if (!client.setCACert_P(caCert, caCertLen))
+  {
+    Serial.println("Failed to load root CA certificate!");
+    while (true)
+    {
+      delay(500);
+      ESP.restart();
+    }
+  }
+  else
+    Serial.println("CA Certificate Loaded!");
   statusBuzzer.on();
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
@@ -527,6 +538,7 @@ void setup(void)
     {
       Serial.println("Successfully fetching NTP Clock!");
       rtc.adjust(DateTime(timeClient.getEpochTime()));
+      client.setX509Time(timeClient.getEpochTime());
     }
     else
     {
@@ -549,6 +561,11 @@ void setup(void)
         statusBuzzer.off();
         delay(500);
         ESP.restart();
+      }
+      else
+      {
+        client.setX509Time(rtc.now().unixtime());
+        Serial.printf("Initializing client x509 time RTC : %lu", rtc.now().unixtime());
       }
     }
     programStarted = false;
@@ -2174,6 +2191,23 @@ void loadAllPrograms()
 /////////////////////////////// SOFT AP, CLIENT AND WEB SERVER API //////////////////////////////////
 void fetchURL(const String &URL, const String &data, int &responseCode, String &response)
 {
+  if (!client.connect(FPSTR(baseUri), 443))
+  {
+    Serial.println("connection failed");
+    responseCode = 408;
+    return "";
+  }
+
+  // Verify validity of server's certificate
+  if (client.verifyCertChain(FPSTR(baseUri)))
+  {
+    Serial.println("Server certificate verified");
+  }
+  else
+  {
+    Serial.println("ERROR: certificate verification failed!");
+    //   return;
+  }
   // configure traged server and url
   http.begin(client, URL); //HTTP
   http.addHeader(F("Content-Type"), F("application/json"));
