@@ -339,6 +339,37 @@ void setup(void)
     ESP.restart();
   }
   eeprom.initialize();
+  if (eeprom.readByte(0) == 0xff && eeprom.readByte(1) == 0xff && eeprom.readByte(10) == 0xff)
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Men-setup sistem");
+    lcd.print("Tunggu sebentar");
+    byte zeroBlank[PROG_LENGTH];
+    std::fill_n(zeroBlank, PROG_LENGTH, 0);
+    eeprom.writeBytes(ADDR_DEVICE_STATUS, PROG_LENGTH, zeroBlank);
+    eeprom.writeByte(0, 0);
+    delay(10);
+    writeToEEPROM(WIFISSID, " ");
+    writeToEEPROM(WIFIPW, " ");
+    writeToEEPROM(SOFTSSID, "Otoma Nexus");
+    writeToEEPROM(SOFTPW, "12121313");
+    writeToEEPROM(USERNAME, " ");
+    writeToEEPROM(USERPASS, " ");
+    writeToEEPROM(DEVICETOKEN, "4f6YqT9GdI");
+    /*
+    4f6YqT9GdI
+    dNLxiQAUAL
+    aXvNuWsuec
+    oT2pFKfAnS
+    zdrmhiDoqR
+    Md5zpyoKtE
+    CRNAnQV0GR
+    aRdG5Pn0aI
+    WraEc78ODU
+    1MC2BDiZQR
+    */
+  }
   delay(100);
   ds18b.begin();
   delay(100);
@@ -1413,9 +1444,9 @@ void lcdTransition(int screen, int progNum)
       encUpperLimit = 0;
       lcd.setCursor(11, 0);
       lcd.print(LCD_ARROW);
-      lcd.setCursor(0, 0);
+      lcd.setCursor(2, 0);
       lcd.print("Tidak ada");
-      lcd.setCursor(0, 1);
+      lcd.setCursor(1, 1);
       lcd.print("program");
     }
     lcd.setCursor(16, 0);
