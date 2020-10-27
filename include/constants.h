@@ -4,7 +4,7 @@
 #define UPDATE_CHECK_INTERVAL 86400000 // ONE DAY
 #define LCD_UPDATE_INTERVAL 100
 #define HTTP_FETCH_INTERVAL 1000
-#define SENSOR_UPDATE_INTERVAL 1000
+#define SENSOR_UPDATE_INTERVAL 500
 #define MAXIMUM_DISCONNECT_TIME 900000 // Maximum WiFi disconnection time or server request time out before rollback to AP Mode and reset FB
 
 #define LCD_ARROW (char)B01111110

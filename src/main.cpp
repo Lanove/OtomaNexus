@@ -290,6 +290,7 @@ char lcdRowBuffer[4][20];
 // cursor dynamics
 int prev_lcdCursor;
 int prev_lcdRowPos;
+int ds18bFaultCounter;
 
 const String freeSketch = String(ESP.getFreeSketchSpace()),
              sketchSize = String(ESP.getSketchSize()),
@@ -441,17 +442,6 @@ void setup(void)
   }
 
   loadAllPrograms();
-  Serial.println("HEEELLLOOOOOO");
-  Serial.println(BUILD_VERSION);
-  Serial.printf("Thermal Setpoint : %f\nHeater Mode : %s\nHeater Kp: %f\nHeater Ki: %f\nHeater Kd: %f\nHeater Ds: %f\nHeater Ba: %f\nHeater Bb: %f\nCooler Mode : %s\nCooler Kp: %f\nCooler Ki: %f\nCooler Kd: %f\nCooler Ds: %f\nCooler Ba: %f\nCooler Bb: %f\n", thermalSetPoint, (bitRead(htclMode, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb, (bitRead(htclMode, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
-  Serial.printf("Thermocontroller Info\nTherco Operation : %s\nTherco Mode %s\n", (bitRead(deviceStatus, BITPOS_TC_OPERATION)) ? "AUTO" : "MANUAL", (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "HEATER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "COOLER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "DUAL" : "INVALID");
-  Serial.printf("Status\nAux Status 1 : %d\nAux Status 2 : %d\nThermocontrol Status : %d\nHeater Status : %d\nCooler Status : %d\n", bitRead(deviceStatus, BITPOS_AUX1_STATUS), bitRead(deviceStatus, BITPOS_AUX2_STATUS), bitRead(deviceStatus, BITPOS_TC_STATUS), bitRead(deviceStatus, BITPOS_HEATER_STATUS), bitRead(deviceStatus, BITPOS_COOLER_STATUS));
-  for (uint8_t i = 0; i < 30; i++)
-  {
-    if (progTrig[i] != 0)
-      Serial.printf("-----------------\nProgram Number %d\nTrigger Type : %d\nRB1 : 0x%X%X%X%X,\nRB2 : 0x%X%X%X%X\nAction Type : %d\n-----------------\n", i, progTrig[i], progRB1[i][3], progRB1[i][2], progRB1[i][1], progRB1[i][0], progRB2[i][3], progRB2[i][2], progRB2[i][1], progRB2[i][0], progAct[i]);
-  }
-
   ds18b.requestTemperatures(); // Send the command to get temperatures
   newTemp = ds18b.getTempCByIndex(0);
   newHumid = dht.readHumidity();
@@ -467,7 +457,6 @@ void setup(void)
   closeSoftAP();
   closeServer();
   programStarted = true;
-  Serial.println("im here2");
   if (!bitReadFB(FB_CONNECTED))
   {
     initiateSoftAP();
@@ -597,7 +586,12 @@ void loop(void)
     }
     sensorBuffer[0] /= ds18b.getDS18Count();
     if (sensorBuffer[0] > 0.00)
+    {
       newTemp = sensorBuffer[0];
+      ds18bFaultCounter = 0;
+    }
+    else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
+      ds18bFaultCounter++;
     if (dhtSampleCounter <= 0)
     {
       delay(5);
@@ -609,16 +603,27 @@ void loop(void)
     if (newTemp <= 0.0 || newTemp > 200.0)
     {
       newTemp = 0.0;
+      ds18bFaultCounter++;
     }
     if (newHumid < 2.0 || newHumid > 100.0)
-    {
       newHumid = 0.0;
-    }
-
-    Serial.printf("heaterPidOutput : %f\n", heaterPidOutput);
-    Serial.printf("Sampling sensor\nFound %d DS18B20 : %f\nDHT11 : %f\n", ds18b.getDS18Count(), newTemp, newHumid);
     sensorMillis = millis();
     free(sensorBuffer);
+    if (ds18bFaultCounter >= 30)
+    {
+      programStarted = false;
+      byteWrite595(0x00);
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Sensor Suhu Error!");
+      lcd.setCursor(0, 1);
+      lcd.print("Merestart kontroller");
+      statusBuzzer.on();
+      delay(2000);
+      statusBuzzer.off();
+      delay(200);
+      ESP.restart();
+    }
   }
   if (serverAvailable)
   {
@@ -685,14 +690,11 @@ void loop(void)
             const char *order = out["order"];
             if (order)
             {
-              Serial.println("order exist!");
               if (strcmp(order, "setParam") == 0)
               {
                 statusBuzzer.setInterval(300);
                 statusBuzzer.disableAfter(301);
-                Serial.println(order);
                 byte *buffer = (byte *)malloc(4);
-
                 if (out["setpoint"])
                 {
                   float ibuffer = out["setpoint"].as<float>();
@@ -993,8 +995,6 @@ void programScan(void)
         lcdCursor = encLowerLimit;
       if (lcdCursor > encUpperLimit)
         lcdCursor = encUpperLimit;
-
-      Serial.printf("lcdCursor %d\n", lcdCursor);
     }
 
     if (bs == ENC_DBCLICKED)
@@ -1051,10 +1051,6 @@ void programScan(void)
         lcdTransition(8);
     }
 
-    if (dt != 0)
-      Serial.printf("Encoder Value %d\n", ev);
-    if (bs == ENC_CLICKED || bs == ENC_DBCLICKED)
-      Serial.printf("buttonState %s\n", (bs == ENC_CLICKED) ? "CLICKED" : (bs == ENC_DBCLICKED) ? "DBCLICKED" : "SMTH ELSE");
     statusLED.update();
     statusBuzzer.update();
     bool statusBuffer[10];
