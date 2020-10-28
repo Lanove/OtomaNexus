@@ -126,7 +126,7 @@ void lcdTransition(int screen, int progNum = 0);
 void lcdUpdate();
 
 HTTPClient http;
-BearSSL::WiFiClientSecure client;
+BearSSL::WiFiClientSecure *client = new BearSSL::WiFiClientSecure();
 BearSSL::X509List cert;
 BearSSL::Session session;
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
@@ -175,10 +175,10 @@ unsigned long disconnectStamp,
     updateCheckMillis,
     lcdUpdateMillis;
 
-byte dhtSampleCounter,
-    byte595Status,
-    deviceStatus,
-    htclMode;
+byte dhtSampleCounter = DHT_LOOP,
+     byte595Status,
+     deviceStatus,
+     htclMode;
 bool disconnectFlag,
     bit595Status;
 
@@ -379,15 +379,16 @@ void setup(void)
   encoderInit();
   dht.begin();
   loadInfo();
+  //75753us
+  //512006us
 
-  client.setCiphersLessSecure();
   if (cert.append(caCert, caCertLen))
     Serial.println("Successfully loading certificate");
   else
     Serial.println("Failed loading certificate!");
-  client.setTrustAnchors(&cert);
-  client.setSession(&session);
-
+  client->setTrustAnchors(&cert);
+  client->setSession(&session);
+  http.setReuse(true);
   if (ds18b.getDS18Count() == 0)
   {
     if (!bitReadFB(FB_DS_NF1))
@@ -537,7 +538,7 @@ void setup(void)
     {
       Serial.println("Successfully fetching NTP Clock!");
       rtc.adjust(DateTime(timeClient.getEpochTime()));
-      client.setX509Time(timeClient.getEpochTime());
+      client->setX509Time(timeClient.getEpochTime());
     }
     else
     {
@@ -563,12 +564,12 @@ void setup(void)
       }
       else
       {
-        client.setX509Time(rtc.now().unixtime());
+        client->setX509Time(rtc.now().unixtime());
         Serial.printf("Initializing client x509 time RTC : %lu", rtc.now().unixtime());
       }
     }
     programStarted = false;
-    t_httpUpdate_return ret = ESPhttpUpdate.update(client, FPSTR(espUpdater), BUILD_VERSION);
+    t_httpUpdate_return ret = ESPhttpUpdate.update(dynamic_cast<WiFiClient &>(*client), FPSTR(espUpdater), BUILD_VERSION);
     switch (ret)
     {
     case HTTP_UPDATE_FAILED:
@@ -591,59 +592,53 @@ void setup(void)
 
 void loop(void)
 {
-  if (millis() - sensorMillis >= SENSOR_UPDATE_INTERVAL)
+  Serial.println("loop");
+  float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
+  dhtSampleCounter--;
+  ds18b.requestTemperatures(); // Send the command to get temperatures
+  for (uint8_t count = ds18b.getDS18Count(); count > 0; count--)
   {
-    unsigned long dmu = micros();
-    float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
-    dhtSampleCounter--;
-    ds18b.requestTemperatures(); // Send the command to get temperatures
-    for (uint8_t count = ds18b.getDS18Count(); count > 0; count--)
-    {
-      sensorBuffer[0] += ds18b.getTempCByIndex(count - 1); // index of sensor start at 0
-    }
-    sensorBuffer[0] /= ds18b.getDS18Count();
-    if (sensorBuffer[0] > 0.00)
-    {
-      newTemp = sensorBuffer[0];
-      ds18bFaultCounter = 0;
-    }
-    else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
-      ds18bFaultCounter++;
-    Serial.printf("DS18B Sample takes %lums\n", micros() - dmu);
-    if (dhtSampleCounter <= 0)
-    {
-      delay(5);
-      dmu = micros();
-      sensorBuffer[1] = dht.readHumidity();
-      if (!isnan(sensorBuffer[1]))
-        newHumid = sensorBuffer[1];
-      dhtSampleCounter = DHT_LOOP;
-      Serial.printf("DHT Sample takes %lums\n", micros() - dmu);
-    }
-    if (newTemp <= 0.0 || newTemp > 200.0)
-    {
-      newTemp = 0.0;
-      ds18bFaultCounter++;
-    }
-    if (newHumid < 2.0 || newHumid > 100.0)
-      newHumid = 0.0;
-    sensorMillis = millis();
-    free(sensorBuffer);
-    if (ds18bFaultCounter >= 30)
-    {
-      programStarted = false;
-      byteWrite595(0x00);
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Sensor Suhu Error!");
-      lcd.setCursor(0, 1);
-      lcd.print("Merestart kontroller");
-      statusBuzzer.on();
-      delay(2000);
-      statusBuzzer.off();
-      delay(200);
-      ESP.restart();
-    }
+    sensorBuffer[0] += ds18b.getTempCByIndex(count - 1); // index of sensor start at 0
+  }
+  sensorBuffer[0] /= ds18b.getDS18Count();
+  if (sensorBuffer[0] > 0.00)
+  {
+    newTemp = sensorBuffer[0];
+    ds18bFaultCounter = 0;
+  }
+  else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
+    ds18bFaultCounter++;
+  if (dhtSampleCounter <= 0)
+  {
+    delay(5);
+    sensorBuffer[1] = dht.readHumidity();
+    if (!isnan(sensorBuffer[1]))
+      newHumid = sensorBuffer[1];
+    dhtSampleCounter = DHT_LOOP;
+  }
+  if (newTemp <= 0.0 || newTemp > 200.0)
+  {
+    newTemp = 0.0;
+    ds18bFaultCounter++;
+  }
+  if (newHumid < 2.0 || newHumid > 100.0)
+    newHumid = 0.0;
+  sensorMillis = millis();
+  free(sensorBuffer);
+  if (ds18bFaultCounter >= 30)
+  {
+    programStarted = false;
+    byteWrite595(0x00);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Sensor Suhu Error!");
+    lcd.setCursor(0, 1);
+    lcd.print("Merestart kontroller");
+    statusBuzzer.on();
+    delay(2000);
+    statusBuzzer.off();
+    delay(200);
+    ESP.restart();
   }
   if (serverAvailable)
   {
@@ -698,7 +693,7 @@ void loop(void)
             disconnectFlag = false;
             disconnectStamp = millis();
           }
-          else if (httpCode >= 400 && httpCode < 500)
+          else if (httpCode >= 400 && httpCode < 500 && !disconnectFlag)
           {
             disconnectFlag = true;
             disconnectStamp = millis();
@@ -872,8 +867,11 @@ void loop(void)
         }
         else
         {
-          disconnectFlag = true;
-          disconnectStamp = millis();
+          if (!disconnectFlag)
+          {
+            disconnectFlag = true;
+            disconnectStamp = millis();
+          }
         }
 
         requestMillis = millis();
@@ -884,8 +882,11 @@ void loop(void)
     }
     else
     {
-      disconnectFlag = true;
-      disconnectStamp = millis();
+      if (!disconnectFlag)
+      {
+        disconnectFlag = true;
+        disconnectStamp = millis();
+      }
     }
   }
   if (disconnectFlag && millis() - disconnectStamp >= MAXIMUM_DISCONNECT_TIME)
@@ -911,7 +912,7 @@ void loop(void)
     Serial.println("Checking update");
     programStarted = false;
     byteWrite595(0x00);
-    t_httpUpdate_return ret = ESPhttpUpdate.update(client, FPSTR(espUpdater), BUILD_VERSION);
+    t_httpUpdate_return ret = ESPhttpUpdate.update(dynamic_cast<WiFiClient &>(*client), FPSTR(espUpdater), BUILD_VERSION);
     switch (ret)
     {
     case HTTP_UPDATE_FAILED:
@@ -927,7 +928,6 @@ void loop(void)
     programStarted = true;
     updateCheckMillis = millis();
   }
-  delay(50);
 }
 
 void debugMemory()
@@ -2195,53 +2195,54 @@ void loadAllPrograms()
 void fetchURL(const String &URL, const String &data, int &responseCode, String &response)
 {
   unsigned long dt = millis();
-  if (!client.connect(FPSTR(baseUri), 443))
+
+  client->setX509Time(timeClient.getEpochTime());
+  // client.setInsecure();
+  // client.setCiphersLessSecure();
+  if (!client->connect(baseUri, 443))
   {
+    Serial.printf("Connecting takes %lums\n", millis() - dt);
     Serial.println("connection failed");
     responseCode = 408;
-    return "";
-  }
-  Serial.printf("Connecting takes %lums\n", millis() - dt);
-  dt = millis();
-  // configure traged server and url
-  http.begin(client, URL); //HTTP
-  Serial.printf("Begin HTTP takes %lums\n", millis() - dt);
-  dt = millis();
-  http.addHeader(F("Content-Type"), F("application/json"));
-  http.addHeader(F("Device-Token"), storedDeviceToken);
-  http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
-  http.addHeader(F("ESP8266-SDK-VERSION"), String(ESP.getSdkVersion()));
-  http.addHeader(F("ESP8266-CORE-VERSION"), ESP.getCoreVersion());
-  http.addHeader(F("ESP8266-MAC"), WiFi.macAddress());
-  http.addHeader(F("ESP8266-SKETCH-MD5"), sketchMD5);
-  http.addHeader(F("ESP8266-SKETCH-FREE-SPACE"), freeSketch);
-  http.addHeader(F("ESP8266-SKETCH-SIZE"), sketchSize);
-  http.addHeader(F("ESP8266-CHIP-SIZE"), chipSize);
-
-  Serial.printf("Add header takes %lums\n", millis() - dt);
-  dt = millis();
-  // start connection and send HTTP header and body
-  int httpCode = http.POST(data);
-  Serial.printf("POST HTTP Takes %lums\n", millis() - dt);
-  dt = millis();
-  responseCode = httpCode;
-  // httpCode will be negative on error
-  if (httpCode > 0)
-  {
-    // HTTP header has been send and Server response header has been handled
-    // file found at server
-    if (httpCode == HTTP_CODE_OK)
-    {
-      response = http.getString();
-    }
+    response = "";
   }
   else
   {
-    Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    Serial.printf("Connecting takes %lums\n", millis() - dt);
+    // configure traged server and url
+    http.begin(dynamic_cast<WiFiClient &>(*client), URL); //HTTP
+    http.addHeader(F("Content-Type"), F("application/json"));
+    http.addHeader(F("Device-Token"), storedDeviceToken);
+    http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
+    http.addHeader(F("ESP8266-SDK-VERSION"), String(ESP.getSdkVersion()));
+    http.addHeader(F("ESP8266-CORE-VERSION"), ESP.getCoreVersion());
+    http.addHeader(F("ESP8266-MAC"), WiFi.macAddress());
+    http.addHeader(F("ESP8266-SKETCH-MD5"), sketchMD5);
+    http.addHeader(F("ESP8266-SKETCH-FREE-SPACE"), freeSketch);
+    http.addHeader(F("ESP8266-SKETCH-SIZE"), sketchSize);
+    http.addHeader(F("ESP8266-CHIP-SIZE"), chipSize);
+    dt = millis();
+    // start connection and send HTTP header and body
+    int httpCode = http.POST(data);
+    Serial.printf("POST HTTP Takes %lums\n", millis() - dt);
+    dt = millis();
+    responseCode = httpCode;
+    // httpCode will be negative on error
+    if (httpCode > 0)
+    {
+      // HTTP header has been send and Server response header has been handled
+      // file found at server
+      if (httpCode == HTTP_CODE_OK)
+      {
+        response = http.getString();
+      }
+    }
+    else
+    {
+      Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+    http.end();
   }
-  http.end();
-  Serial.printf("Fetching data and end takes %lums\n", millis() - dt);
-  dt = millis();
 }
 
 bool isWifiConnected()
