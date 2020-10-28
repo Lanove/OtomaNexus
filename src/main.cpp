@@ -294,6 +294,7 @@ int prev_lcdRowPos;
 int ds18bFaultCounter;
 
 unsigned long averageRequestTime,
+    totalRequestTime,
     maximumRequestTime,
     minimumRequestTime = 99999999,
     totalRequestCount,
@@ -619,9 +620,12 @@ void loop(void)
   {
     if (isWifiConnected())
     {
+
       if (millis() - requestMillis >= HTTP_FETCH_INTERVAL)
       {
         ESP.resetFreeContStack();
+        if (totalRequestCount % 100000 == 0)
+          totalRequestTime = 0;
         totalRequestCount++;
         uint32_t freeStackStart = ESP.getFreeContStack();
         uint32_t timeTakenStart = millis();
@@ -854,11 +858,31 @@ void loop(void)
           maximumRequestTime = timeTaken;
         if (timeTaken < minimumRequestTime)
           minimumRequestTime = timeTaken;
-        if (totalRequestCount == 1)
-          averageRequestTime = timeTaken;
-        else
-          averageRequestTime = (averageRequestTime + timeTaken) / 2;
+        totalRequestTime += timeTaken;
+        averageRequestTime = totalRequestTime / (totalRequestCount % 100000);
         Serial.printf("Main online routine takes : %lums - average %lums - minimum %lums - maximum %lums\nTotal request count %lu - fail %lu - success %lu %04.2f%%\nCONT stack used at main fetch url: %lu\n-------\n\n", timeTaken, averageRequestTime, minimumRequestTime, maximumRequestTime, totalRequestCount, failedRequestCount, successRequestCount, float(successRequestCount) / float(totalRequestCount) * 100.0, freeStackStart - freeStackEnd);
+      }
+
+      if (millis() - updateCheckMillis >= UPDATE_CHECK_INTERVAL)
+      {
+        Serial.println("Checking update");
+        programStarted = false;
+        byteWrite595(0x00);
+        t_httpUpdate_return ret = ESPhttpUpdate.update(dynamic_cast<WiFiClient &>(*client), FPSTR(espUpdater), BUILD_VERSION);
+        switch (ret)
+        {
+        case HTTP_UPDATE_FAILED:
+          Serial.println("[update] Update failed.");
+          break;
+        case HTTP_UPDATE_NO_UPDATES:
+          Serial.println("[update] Update no Update.");
+          break;
+        case HTTP_UPDATE_OK:
+          Serial.println("[update] Update ok."); // may not be called since we reboot the ESP
+          break;
+        }
+        programStarted = true;
+        updateCheckMillis = millis();
       }
     }
     else
@@ -888,73 +912,55 @@ void loop(void)
     delay(500);
     ESP.reset();
   }
-  if (millis() - updateCheckMillis >= UPDATE_CHECK_INTERVAL)
+  if (millis() - sensorMillis >= SENSOR_UPDATE_INTERVAL)
   {
-    Serial.println("Checking update");
-    programStarted = false;
-    byteWrite595(0x00);
-    t_httpUpdate_return ret = ESPhttpUpdate.update(dynamic_cast<WiFiClient &>(*client), FPSTR(espUpdater), BUILD_VERSION);
-    switch (ret)
+    float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
+    dhtSampleCounter--;
+    ds18b.requestTemperatures(); // Send the command to get temperatures
+    for (uint8_t count = ds18b.getDS18Count(); count > 0; count--)
     {
-    case HTTP_UPDATE_FAILED:
-      Serial.println("[update] Update failed.");
-      break;
-    case HTTP_UPDATE_NO_UPDATES:
-      Serial.println("[update] Update no Update.");
-      break;
-    case HTTP_UPDATE_OK:
-      Serial.println("[update] Update ok."); // may not be called since we reboot the ESP
-      break;
+      sensorBuffer[0] += ds18b.getTempCByIndex(count - 1); // index of sensor start at 0
     }
-    programStarted = true;
-    updateCheckMillis = millis();
-  }
-  sensorMillis = millis();
-  float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
-  dhtSampleCounter--;
-  ds18b.requestTemperatures(); // Send the command to get temperatures
-  for (uint8_t count = ds18b.getDS18Count(); count > 0; count--)
-  {
-    sensorBuffer[0] += ds18b.getTempCByIndex(count - 1); // index of sensor start at 0
-  }
-  sensorBuffer[0] /= ds18b.getDS18Count();
-  if (sensorBuffer[0] > 0.00)
-  {
-    newTemp = sensorBuffer[0];
-    ds18bFaultCounter = 0;
-  }
-  else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
-    ds18bFaultCounter++;
-  if (dhtSampleCounter <= 0)
-  {
-    delay(5);
-    sensorBuffer[1] = dht.readHumidity();
-    if (!isnan(sensorBuffer[1]))
-      newHumid = sensorBuffer[1];
-    dhtSampleCounter = DHT_LOOP;
-  }
-  if (newTemp <= 0.0 || newTemp > 200.0)
-  {
-    newTemp = 0.0;
-    ds18bFaultCounter++;
-  }
-  if (newHumid < 2.0 || newHumid > 100.0)
-    newHumid = 0.0;
-  free(sensorBuffer);
-  if (ds18bFaultCounter >= 30)
-  {
-    programStarted = false;
-    byteWrite595(0x00);
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Sensor Suhu Error!");
-    lcd.setCursor(0, 1);
-    lcd.print("Merestart kontroller");
-    statusBuzzer.on();
-    delay(2000);
-    statusBuzzer.off();
-    delay(200);
-    ESP.restart();
+    sensorBuffer[0] /= ds18b.getDS18Count();
+    if (sensorBuffer[0] > 0.00)
+    {
+      newTemp = sensorBuffer[0];
+      ds18bFaultCounter = 0;
+    }
+    else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
+      ds18bFaultCounter++;
+    if (dhtSampleCounter <= 0)
+    {
+      delay(5);
+      sensorBuffer[1] = dht.readHumidity();
+      if (!isnan(sensorBuffer[1]))
+        newHumid = sensorBuffer[1];
+      dhtSampleCounter = DHT_LOOP;
+    }
+    if (newTemp <= 0.0 || newTemp > 200.0)
+    {
+      newTemp = 0.0;
+      ds18bFaultCounter++;
+    }
+    if (newHumid < 2.0 || newHumid > 100.0)
+      newHumid = 0.0;
+    free(sensorBuffer);
+    if (ds18bFaultCounter >= 30)
+    {
+      programStarted = false;
+      byteWrite595(0x00);
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Sensor Suhu Error!");
+      lcd.setCursor(0, 1);
+      lcd.print("Merestart kontroller");
+      statusBuzzer.on();
+      delay(2000);
+      statusBuzzer.off();
+      delay(200);
+      ESP.restart();
+    }
+    sensorMillis = millis();
   }
 }
 
@@ -1032,9 +1038,9 @@ void programScan(void)
       //Constrain the value of lcdCursor according to each lcdScreen limit
       if (lcdScreen == 1)
         encUpperLimit = 0;
-      else if (lcdScreen == 2 || lcdScreen == 3)
+      else if (lcdScreen == 3)
         encUpperLimit = 4;
-      else if (lcdScreen == 4)
+      else if (lcdScreen == 2 || lcdScreen == 4)
         encUpperLimit = 5;
       else if (lcdScreen == 6 || lcdScreen == 5)
         encUpperLimit = 7;
@@ -1061,6 +1067,14 @@ void programScan(void)
           lcdTransition(7);
         else if (lcdCursor == 4)
           lcdTransition(1);
+        else if (lcdCursor == 5)
+        {
+          statusBuzzer.on();
+          delay(500);
+          statusBuzzer.off();
+          delay(100);
+          ESP.restart();
+        }
       }
       else if (lcdScreen == 3)
       {
@@ -1357,9 +1371,9 @@ void lcdTransition(int screen, int progNum)
     DateTime now = rtc.now();
     lcd.setCursor(0, 0);
     lcd.print(LCD_ARROW);
-    lcd.printf("Output         Back");
+    lcd.printf("Output      Back");
     lcd.setCursor(1, 1);
-    lcd.printf("Therco");
+    lcd.printf("Therco      ");
     lcd.setCursor(1, 2);
     lcd.printf("Program  %02d/%02d/%04d", now.day(), now.month(), now.year());
     lcd.setCursor(1, 3);
@@ -1586,7 +1600,9 @@ void lcdUpdate()
       lcd.print(" ");
       lcd.setCursor(0, 3);
       lcd.print(" ");
-      lcd.setCursor(15, 0);
+      lcd.setCursor(12, 0);
+      lcd.print(" ");
+      lcd.setCursor(12, 1);
       lcd.print(" ");
       if (lcdCursor == 0)
         lcd.setCursor(0, 0);
@@ -1597,7 +1613,9 @@ void lcdUpdate()
       else if (lcdCursor == 3)
         lcd.setCursor(0, 3);
       else if (lcdCursor == 4)
-        lcd.setCursor(15, 0);
+        lcd.setCursor(12, 0);
+      else if (lcdCursor == 5)
+        lcd.setCursor(12, 1);
       lcd.print(LCD_ARROW);
     }
     if (millis() - screen2millis > 1000)
