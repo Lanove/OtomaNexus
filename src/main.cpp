@@ -274,7 +274,6 @@ float prev_coolerKp,
     prev_coolerDs,
     prev_coolerBa,
     prev_coolerBb;
-
 char lcdRowBuffer[4][20];
 
 // Page 7 had no dynamics
@@ -293,6 +292,13 @@ char lcdRowBuffer[4][20];
 int prev_lcdCursor;
 int prev_lcdRowPos;
 int ds18bFaultCounter;
+
+unsigned long averageRequestTime,
+    maximumRequestTime,
+    minimumRequestTime = 99999999,
+    totalRequestCount,
+    failedRequestCount,
+    successRequestCount;
 
 const String freeSketch = String(ESP.getFreeSketchSpace()),
              sketchSize = String(ESP.getSketchSize()),
@@ -385,7 +391,14 @@ void setup(void)
   if (cert.append(caCert, caCertLen))
     Serial.println("Successfully loading certificate");
   else
+  {
     Serial.println("Failed loading certificate!");
+    statusBuzzer.on();
+    delay(100);
+    statusBuzzer.off();
+    delay(100);
+    ESP.restart();
+  }
   client->setTrustAnchors(&cert);
   client->setSession(&session);
   http.setReuse(true);
@@ -546,6 +559,11 @@ void setup(void)
       DateTime now = rtc.now();
       if (!rtc.isrunning() || now < 1577836800)
       {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("RTC Gagal");
+        lcd.setCursor(0, 1);
+        lcd.print("Merestart kontroller");
         Serial.println("Could'nt Initiate RTC!");
         // We're fucked up my friend, RTC is not running and can't fetch NTP time, so we'll stop right there too
         // failed to init rtc
@@ -568,6 +586,7 @@ void setup(void)
         Serial.printf("Initializing client x509 time RTC : %lu", rtc.now().unixtime());
       }
     }
+
     programStarted = false;
     t_httpUpdate_return ret = ESPhttpUpdate.update(dynamic_cast<WiFiClient &>(*client), FPSTR(espUpdater), BUILD_VERSION);
     switch (ret)
@@ -592,54 +611,6 @@ void setup(void)
 
 void loop(void)
 {
-  Serial.println("loop");
-  float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
-  dhtSampleCounter--;
-  ds18b.requestTemperatures(); // Send the command to get temperatures
-  for (uint8_t count = ds18b.getDS18Count(); count > 0; count--)
-  {
-    sensorBuffer[0] += ds18b.getTempCByIndex(count - 1); // index of sensor start at 0
-  }
-  sensorBuffer[0] /= ds18b.getDS18Count();
-  if (sensorBuffer[0] > 0.00)
-  {
-    newTemp = sensorBuffer[0];
-    ds18bFaultCounter = 0;
-  }
-  else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
-    ds18bFaultCounter++;
-  if (dhtSampleCounter <= 0)
-  {
-    delay(5);
-    sensorBuffer[1] = dht.readHumidity();
-    if (!isnan(sensorBuffer[1]))
-      newHumid = sensorBuffer[1];
-    dhtSampleCounter = DHT_LOOP;
-  }
-  if (newTemp <= 0.0 || newTemp > 200.0)
-  {
-    newTemp = 0.0;
-    ds18bFaultCounter++;
-  }
-  if (newHumid < 2.0 || newHumid > 100.0)
-    newHumid = 0.0;
-  sensorMillis = millis();
-  free(sensorBuffer);
-  if (ds18bFaultCounter >= 30)
-  {
-    programStarted = false;
-    byteWrite595(0x00);
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Sensor Suhu Error!");
-    lcd.setCursor(0, 1);
-    lcd.print("Merestart kontroller");
-    statusBuzzer.on();
-    delay(2000);
-    statusBuzzer.off();
-    delay(200);
-    ESP.restart();
-  }
   if (serverAvailable)
   {
     server.handleClient(); // Listen for HTTP requests from clients
@@ -651,6 +622,7 @@ void loop(void)
       if (millis() - requestMillis >= HTTP_FETCH_INTERVAL)
       {
         ESP.resetFreeContStack();
+        totalRequestCount++;
         uint32_t freeStackStart = ESP.getFreeContStack();
         uint32_t timeTakenStart = millis();
         DateTime now = rtc.now();
@@ -877,7 +849,16 @@ void loop(void)
         requestMillis = millis();
         debugMemory();
         uint32_t freeStackEnd = ESP.getFreeContStack();
-        Serial.printf("Main online routine takes : %dms\nCONT stack used at main fetch url: %d\n-------\n\n", millis() - timeTakenStart, freeStackStart - freeStackEnd);
+        uint32_t timeTaken = millis() - timeTakenStart;
+        if (timeTaken > maximumRequestTime)
+          maximumRequestTime = timeTaken;
+        if (timeTaken < minimumRequestTime)
+          minimumRequestTime = timeTaken;
+        if (totalRequestCount == 1)
+          averageRequestTime = timeTaken;
+        else
+          averageRequestTime = (averageRequestTime + timeTaken) / 2;
+        Serial.printf("Main online routine takes : %lums - average %lums - minimum %lums - maximum %lums\nTotal request count %lu - fail %lu - success %lu %04.2f%%\nCONT stack used at main fetch url: %lu\n-------\n\n", timeTaken, averageRequestTime, minimumRequestTime, maximumRequestTime, totalRequestCount, failedRequestCount, successRequestCount, float(successRequestCount) / float(totalRequestCount) * 100.0, freeStackStart - freeStackEnd);
       }
     }
     else
@@ -927,6 +908,53 @@ void loop(void)
     }
     programStarted = true;
     updateCheckMillis = millis();
+  }
+  sensorMillis = millis();
+  float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
+  dhtSampleCounter--;
+  ds18b.requestTemperatures(); // Send the command to get temperatures
+  for (uint8_t count = ds18b.getDS18Count(); count > 0; count--)
+  {
+    sensorBuffer[0] += ds18b.getTempCByIndex(count - 1); // index of sensor start at 0
+  }
+  sensorBuffer[0] /= ds18b.getDS18Count();
+  if (sensorBuffer[0] > 0.00)
+  {
+    newTemp = sensorBuffer[0];
+    ds18bFaultCounter = 0;
+  }
+  else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
+    ds18bFaultCounter++;
+  if (dhtSampleCounter <= 0)
+  {
+    delay(5);
+    sensorBuffer[1] = dht.readHumidity();
+    if (!isnan(sensorBuffer[1]))
+      newHumid = sensorBuffer[1];
+    dhtSampleCounter = DHT_LOOP;
+  }
+  if (newTemp <= 0.0 || newTemp > 200.0)
+  {
+    newTemp = 0.0;
+    ds18bFaultCounter++;
+  }
+  if (newHumid < 2.0 || newHumid > 100.0)
+    newHumid = 0.0;
+  free(sensorBuffer);
+  if (ds18bFaultCounter >= 30)
+  {
+    programStarted = false;
+    byteWrite595(0x00);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Sensor Suhu Error!");
+    lcd.setCursor(0, 1);
+    lcd.print("Merestart kontroller");
+    statusBuzzer.on();
+    delay(2000);
+    statusBuzzer.off();
+    delay(200);
+    ESP.restart();
   }
 }
 
@@ -2205,6 +2233,7 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
     Serial.println("connection failed");
     responseCode = 408;
     response = "";
+    failedRequestCount++;
   }
   else
   {
@@ -2234,11 +2263,13 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
       // file found at server
       if (httpCode == HTTP_CODE_OK)
       {
+        successRequestCount++;
         response = http.getString();
       }
     }
     else
     {
+      failedRequestCount++;
       Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
     }
     http.end();
@@ -2254,6 +2285,7 @@ bool initiateSoftAP()
 {
   programStarted = false;
   lcd.clear();
+  delay(100);
   lcd.setCursor(0, 0);
   lcd.print("Membuka soft AP");
   lcd.setCursor(0, 1);
@@ -2295,6 +2327,8 @@ bool initiateSoftAP()
       delay(500);
     }
   }
+
+  lcd.clear();
   programStarted = true;
 
   statusBuzzer.off();
@@ -2307,7 +2341,6 @@ bool initiateSoftAP()
   statusBuzzer.off();
   delay(500);
   statusBuzzer.off();
-  lcd.clear();
   return timeOutFlag;
 }
 
@@ -2460,6 +2493,76 @@ void pgAccInfo()
 
   if (initiateClient(ssid, wfpw))
   {
+    programStarted = false;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Menghubungi Server..");
+    lcd.setCursor(0, 1);
+    lcd.print("Mohon tunggu...");
+
+    timeClient.begin(); // If WiFi connection success, start NTP timeClient
+    bool forceUpd = timeClient.forceUpdate();
+    // try to fetch ntp time for maximum of 4 time before
+    if (!forceUpd)
+    {
+      delay(500);
+      forceUpd = timeClient.forceUpdate();
+      if (!forceUpd)
+      {
+        delay(500);
+        forceUpd = timeClient.forceUpdate();
+        if (!forceUpd)
+        {
+          delay(500);
+          forceUpd = timeClient.forceUpdate();
+          if (!forceUpd)
+          {
+            delay(500);
+            forceUpd = timeClient.forceUpdate();
+          }
+        }
+      }
+    }
+
+    if (forceUpd)
+    {
+      Serial.println("Successfully fetching NTP Clock!");
+      rtc.adjust(DateTime(timeClient.getEpochTime()));
+      client->setX509Time(timeClient.getEpochTime());
+    }
+    else
+    {
+      Serial.println("Failed fetching NTP Clock");
+      DateTime now = rtc.now();
+      if (!rtc.isrunning() || now < 1577836800)
+      {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("RTC Gagal");
+        lcd.setCursor(0, 1);
+        lcd.print("Merestart kontroller");
+        Serial.println("Could'nt Initiate RTC!");
+        // We're fucked up my friend, RTC is not running and can't fetch NTP time, so we'll stop right there too
+        // failed to init rtc
+        // add some loud ass error buzzer here
+        // rtc is important element, so stop right here if something is wrong
+        statusBuzzer.off();
+        statusBuzzer.on();
+        delay(2000);
+        statusBuzzer.off();
+        delay(2000);
+        statusBuzzer.on();
+        delay(2000);
+        statusBuzzer.off();
+        delay(500);
+        ESP.restart();
+      }
+      else
+      {
+        client->setX509Time(rtc.now().unixtime());
+        Serial.printf("Initializing client x509 time RTC : %lu", rtc.now().unixtime());
+      }
+    }
     // This WiFi seems legit, let's save to EEPROM
     writeToEEPROM(WIFISSID, ssid);
     writeToEEPROM(WIFIPW, wfpw);
@@ -2511,22 +2614,53 @@ void pgAccInfo()
   else // Cannot connect to WiFi, report invalid SSID or Password!
     responseStatus = "invwifi";
   // Reinitiate softAP and re deploy the web server to 192.168.4.1
+
+  programStarted = false;
+  if (responseStatus == "success" || responseStatus == "recon")
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Berhasil terhubung");
+    lcd.setCursor(0, 1);
+    lcd.print("Ke server");
+    lcd.setCursor(0, 2);
+    lcd.print("Mohon restart");
+    lcd.setCursor(0, 3);
+    lcd.print("kontroller");
+    statusBuzzer.on();
+    delay(500);
+    statusBuzzer.off();
+    delay(100);
+    statusBuzzer.on();
+    delay(500);
+    statusBuzzer.off();
+  }
+  else
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Terjadi kesalahan");
+    lcd.setCursor(0, 1);
+    lcd.print("Cek 192.168.4.1 lagi");
+    lcd.setCursor(0, 2);
+    lcd.print("Untuk info detailnya");
+    statusBuzzer.on();
+    delay(1000);
+    statusBuzzer.off();
+    delay(100);
+    statusBuzzer.on();
+    delay(1000);
+    statusBuzzer.off();
+  }
+  delay(5000);
   closeClient();
   closeServer();
   closeSoftAP();
   initiateSoftAP();
   deployWebServer();
 
-  if (responseStatus == "success" || responseStatus == "recon")
-  {
-    statusBuzzer.setPattern(100, buzzerSuccessPattern, sizeof(buzzerErrorPattern) / sizeof(buzzerErrorPattern[0]));
-    statusBuzzer.disableAfter(3000);
-  }
-  else
-  {
-    statusBuzzer.setPattern(500, buzzerErrorPattern, sizeof(buzzerErrorPattern) / sizeof(buzzerErrorPattern[0]));
-    statusBuzzer.disableAfter(3000);
-  }
+  lcdTransition(1);
+  programStarted = true;
 }
 
 void pgReqStatus()
