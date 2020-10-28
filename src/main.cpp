@@ -126,7 +126,9 @@ void lcdTransition(int screen, int progNum = 0);
 void lcdUpdate();
 
 HTTPClient http;
-WiFiClientSecure client;
+BearSSL::WiFiClientSecure client;
+BearSSL::X509List cert;
+BearSSL::Session session;
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200); // 25200 for UTC+7, 3600*(UTC)
@@ -312,17 +314,6 @@ void setup(void)
   storedSoftSSID.reserve(32);
   storedSoftWifiPass.reserve(64);
   storedDeviceToken.reserve(10);
-  if (!client.setCACert_P(caCert, caCertLen))
-  {
-    Serial.println("Failed to load root CA certificate!");
-    while (true)
-    {
-      delay(500);
-      ESP.restart();
-    }
-  }
-  else
-    Serial.println("CA Certificate Loaded!");
   statusBuzzer.on();
   // pinMode(LED_BUILTIN, OUTPUT);
   delay(100);
@@ -388,6 +379,14 @@ void setup(void)
   encoderInit();
   dht.begin();
   loadInfo();
+
+  client.setCiphersLessSecure();
+  if (cert.append(caCert, caCertLen))
+    Serial.println("Successfully loading certificate");
+  else
+    Serial.println("Failed loading certificate!");
+  client.setTrustAnchors(&cert);
+  client.setSession(&session);
 
   if (ds18b.getDS18Count() == 0)
   {
@@ -594,6 +593,7 @@ void loop(void)
 {
   if (millis() - sensorMillis >= SENSOR_UPDATE_INTERVAL)
   {
+    unsigned long dmu = micros();
     float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
     dhtSampleCounter--;
     ds18b.requestTemperatures(); // Send the command to get temperatures
@@ -609,13 +609,16 @@ void loop(void)
     }
     else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
       ds18bFaultCounter++;
+    Serial.printf("DS18B Sample takes %lums\n", micros() - dmu);
     if (dhtSampleCounter <= 0)
     {
       delay(5);
+      dmu = micros();
       sensorBuffer[1] = dht.readHumidity();
       if (!isnan(sensorBuffer[1]))
         newHumid = sensorBuffer[1];
       dhtSampleCounter = DHT_LOOP;
+      Serial.printf("DHT Sample takes %lums\n", micros() - dmu);
     }
     if (newTemp <= 0.0 || newTemp > 200.0)
     {
@@ -2191,25 +2194,19 @@ void loadAllPrograms()
 /////////////////////////////// SOFT AP, CLIENT AND WEB SERVER API //////////////////////////////////
 void fetchURL(const String &URL, const String &data, int &responseCode, String &response)
 {
+  unsigned long dt = millis();
   if (!client.connect(FPSTR(baseUri), 443))
   {
     Serial.println("connection failed");
     responseCode = 408;
     return "";
   }
-
-  // Verify validity of server's certificate
-  if (client.verifyCertChain(FPSTR(baseUri)))
-  {
-    Serial.println("Server certificate verified");
-  }
-  else
-  {
-    Serial.println("ERROR: certificate verification failed!");
-    //   return;
-  }
+  Serial.printf("Connecting takes %lums\n", millis() - dt);
+  dt = millis();
   // configure traged server and url
   http.begin(client, URL); //HTTP
+  Serial.printf("Begin HTTP takes %lums\n", millis() - dt);
+  dt = millis();
   http.addHeader(F("Content-Type"), F("application/json"));
   http.addHeader(F("Device-Token"), storedDeviceToken);
   http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
@@ -2221,8 +2218,12 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
   http.addHeader(F("ESP8266-SKETCH-SIZE"), sketchSize);
   http.addHeader(F("ESP8266-CHIP-SIZE"), chipSize);
 
+  Serial.printf("Add header takes %lums\n", millis() - dt);
+  dt = millis();
   // start connection and send HTTP header and body
   int httpCode = http.POST(data);
+  Serial.printf("POST HTTP Takes %lums\n", millis() - dt);
+  dt = millis();
   responseCode = httpCode;
   // httpCode will be negative on error
   if (httpCode > 0)
@@ -2239,6 +2240,8 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
     Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
   }
   http.end();
+  Serial.printf("Fetching data and end takes %lums\n", millis() - dt);
+  dt = millis();
 }
 
 bool isWifiConnected()

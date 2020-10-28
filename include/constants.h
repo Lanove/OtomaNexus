@@ -104,7 +104,7 @@
 #define MODE_HYSTERESIS 1
 #define MODE_OPERATION_MANUAL 0
 #define MODE_OPERATION_AUTO 1
-static const char baseUri[] PROGMEM = "www.otoma.my.id";
+const char baseUri[] = "www.otoma.my.id";
 static const char espUpdater[] PROGMEM = "https://www.otoma.my.id/api/ESPUpdater.php";
 static const char requestURL[] PROGMEM = "https://www.otoma.my.id/api/nexusControllerRequest.php";
 static const char identifyURL[] PROGMEM = "https://www.otoma.my.id/api/identifyDevice.php";
@@ -117,7 +117,7 @@ static const char htmlDoc[] PROGMEM = R"=====(
 )=====";
 
 // CA Certificate of DigiCert Baltimore
-const unsigned char caCert[] PROGMEM = {
+const uint8_t *caCert = {
     0x30, 0x82, 0x03, 0x77, 0x30, 0x82, 0x02, 0x5f, 0xa0, 0x03, 0x02, 0x01,
     0x02, 0x02, 0x04, 0x02, 0x00, 0x00, 0xb9, 0x30, 0x0d, 0x06, 0x09, 0x2a,
     0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x05, 0x05, 0x00, 0x30, 0x5a,
