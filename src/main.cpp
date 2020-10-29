@@ -1373,7 +1373,7 @@ void lcdTransition(int screen, int progNum)
     lcd.print(LCD_ARROW);
     lcd.printf("Output      Back");
     lcd.setCursor(1, 1);
-    lcd.printf("Therco      ");
+    lcd.printf("Therco      Restart");
     lcd.setCursor(1, 2);
     lcd.printf("Program  %02d/%02d/%04d", now.day(), now.month(), now.year());
     lcd.setCursor(1, 3);
