@@ -1350,15 +1350,15 @@ void lcdTransition(int screen, int progNum)
   lcd.clear();
   if (screen == 1)
   {
-    lcd.setCursor(1, 0);
+    lcd.setCursor(0, 0);
     lcd.printf("Suhu:%05.2f", newTemp);
     lcd.print(LCD_DEGREE); // print [degree] character
     lcd.print("C");
-    lcd.setCursor(14, 0);
-    lcd.printf("%s", (isWifiConnected()) ? "ONL" : "OFFL");
-    lcd.setCursor(1, 1);
+    lcd.setCursor(13, 0);
+    lcd.printf("%s", (isWifiConnected()) ? "ONLINE" : "OFFLINE");
+    lcd.setCursor(0, 1);
     lcd.printf("Hmdt:%05.1f%%", newHumid);
-    lcd.setCursor(1, 2);
+    lcd.setCursor(0, 2);
     lcd.printf("SP  : %04.1f", thermalSetPoint);
     lcd.print(LCD_DEGREE); // print [degree] character
     lcd.print("C");
@@ -1568,23 +1568,23 @@ void lcdUpdate()
     lcd.print(LCD_ARROW);
     if (prev_newTemp != newTemp)
     {
-      lcd.setCursor(6, 0);
+      lcd.setCursor(5, 0);
       lcd.printf("%05.2f", newTemp);
     }
     if (prev_newHumid != newHumid)
     {
-      lcd.setCursor(6, 1);
+      lcd.setCursor(5, 1);
       lcd.printf("%05.1f", newHumid);
     }
     if (prev_thermalSetPoint != thermalSetPoint)
     {
-      lcd.setCursor(7, 2);
+      lcd.setCursor(6, 2);
       lcd.printf("%05.1f", thermalSetPoint);
     }
     if (prev_wifiStatus != isWifiConnected())
     {
-      lcd.setCursor(14, 0);
-      lcd.printf("%s", (isWifiConnected()) ? "Online" : "Offline");
+      lcd.setCursor(13, 0);
+      lcd.printf("%s", (isWifiConnected()) ? "ONLINE" : "OFFLINE");
     }
   }
   else if (lcdScreen == 2)
