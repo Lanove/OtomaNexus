@@ -175,10 +175,10 @@ unsigned long disconnectStamp,
     updateCheckMillis,
     lcdUpdateMillis;
 
-byte dhtSampleCounter = DHT_LOOP,
-     byte595Status,
-     deviceStatus,
-     htclMode;
+byte dhtSampleCounter,
+    byte595Status,
+    deviceStatus,
+    htclMode;
 bool disconnectFlag,
     bit595Status;
 
@@ -383,8 +383,11 @@ void setup(void)
   delay(100);
   ds18b.begin();
   delay(100);
-  encoderInit();
   dht.begin();
+  delay(100);
+  newHumid = dht.readHumidity();
+  delay(100);
+  encoderInit();
   loadInfo();
   //75753us
   //512006us
@@ -469,7 +472,6 @@ void setup(void)
   loadAllPrograms();
   ds18b.requestTemperatures(); // Send the command to get temperatures
   newTemp = ds18b.getTempCByIndex(0);
-  newHumid = dht.readHumidity();
 
   heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
   coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
@@ -620,7 +622,6 @@ void loop(void)
   {
     if (isWifiConnected())
     {
-
       if (millis() - requestMillis >= HTTP_FETCH_INTERVAL)
       {
         ESP.resetFreeContStack();
@@ -915,6 +916,14 @@ void loop(void)
   if (millis() - sensorMillis >= SENSOR_UPDATE_INTERVAL)
   {
     float *sensorBuffer = (float *)malloc(sizeof(float) * 2);
+    if (dhtSampleCounter <= 0)
+    {
+      sensorBuffer[1] = dht.readHumidity();
+      if (!isnan(sensorBuffer[1]))
+        newHumid = sensorBuffer[1];
+      dhtSampleCounter = DHT_LOOP;
+      delay(100);
+    }
     dhtSampleCounter--;
     ds18b.requestTemperatures(); // Send the command to get temperatures
     for (uint8_t count = ds18b.getDS18Count(); count > 0; count--)
@@ -929,14 +938,6 @@ void loop(void)
     }
     else if (isnan(sensorBuffer[0]) || !(sensorBuffer[0] > 0.00) || isinf(sensorBuffer[0]))
       ds18bFaultCounter++;
-    if (dhtSampleCounter <= 0)
-    {
-      delay(5);
-      sensorBuffer[1] = dht.readHumidity();
-      if (!isnan(sensorBuffer[1]))
-        newHumid = sensorBuffer[1];
-      dhtSampleCounter = DHT_LOOP;
-    }
     if (newTemp <= 0.0 || newTemp > 200.0)
     {
       newTemp = 0.0;
@@ -1357,7 +1358,7 @@ void lcdTransition(int screen, int progNum)
     lcd.setCursor(13, 0);
     lcd.printf("%s", (isWifiConnected()) ? "ONLINE" : "OFFLINE");
     lcd.setCursor(0, 1);
-    lcd.printf("Hmdt:%05.1f%%", newHumid);
+    lcd.printf("Hmdt:    %2.0f%%", newHumid);
     lcd.setCursor(0, 2);
     lcd.printf("SP  : %04.1f", thermalSetPoint);
     lcd.print(LCD_DEGREE); // print [degree] character
@@ -1573,8 +1574,10 @@ void lcdUpdate()
     }
     if (prev_newHumid != newHumid)
     {
-      lcd.setCursor(5, 1);
-      lcd.printf("%05.1f", newHumid);
+      lcd.setCursor(8, 1);
+      lcd.print("      ");
+      lcd.setCursor(9, 1);
+      lcd.printf("%2.0f%%", newHumid);
     }
     if (prev_thermalSetPoint != thermalSetPoint)
     {
