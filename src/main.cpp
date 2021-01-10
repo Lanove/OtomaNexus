@@ -115,7 +115,6 @@ bool bitRead595(byte docchi);
 void byteWrite595(const uint8_t data);
 void selectMux(byte channel);
 int readMux();
-uint8_t uselessNumberParser(uint8_t progAct);
 void programScan(void);
 void encoderInit();
 void encoderUpdate(bool &direction, uint8_t &buttonstate, int16_t &encvalue, int16_t &delta);
@@ -823,44 +822,6 @@ void debugMemory()
   Serial.printf("Stack : %d\nHeap : %d\n", ESP.getFreeContStack(), ESP.getFreeHeap());
 }
 
-uint8_t uselessNumberParser(uint8_t progAct)
-{
-  switch (progAct)
-  {
-  case 1:
-    return 2;
-    break;
-  case 2:
-    return 3;
-    break;
-  case 3:
-    return 0;
-    break;
-  case 4:
-    return 1;
-    break;
-  case 5:
-    return 4;
-    break;
-  case 6:
-    return 2;
-    break;
-  case 7:
-    return 3;
-    break;
-  case 8:
-    return 0;
-    break;
-  case 9:
-    return 1;
-    break;
-  case 10:
-    return 4;
-    break;
-  }
-  return 0;
-}
-
 void programScan(void)
 {
   if (programStarted)
@@ -997,16 +958,14 @@ void programScan(void)
 
           if (condition)
           {
-            if (progAct[i] == 1 || progAct[i] == 6)
-              statusBuffer[2] = (progAct[i] == 1) ? MURUP : MATI;
-            if (progAct[i] == 2 || progAct[i] == 7)
-              statusBuffer[3] = (progAct[i] == 2) ? MURUP : MATI;
-            if (progAct[i] == 3 || progAct[i] == 8)
-              statusBuffer[0] = (progAct[i] == 3) ? MURUP : MATI;
-            if (progAct[i] == 4 || progAct[i] == 9)
-              statusBuffer[1] = (progAct[i] == 4) ? MURUP : MATI;
-            if (progAct[i] == 5 || progAct[i] == 10)
-              statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
+            if (progAct[i] == 1 || progAct[i] == 5)
+              statusBuffer[0] = (progAct[i] == 1) ? MURUP : MATI;
+            if (progAct[i] == 2 || progAct[i] == 6)
+              statusBuffer[1] = (progAct[i] == 2) ? MURUP : MATI;
+            if (progAct[i] == 3 || progAct[i] == 7)
+              statusBuffer[2] = (progAct[i] == 3) ? MURUP : MATI;
+            if (progAct[i] == 4 || progAct[i] == 8)
+              statusBuffer[3] = (progAct[i] == 4) ? MURUP : MATI;
           }
         }
         else if (progTrig[i] == 3 || progTrig[i] == 4)
@@ -1023,18 +982,18 @@ void programScan(void)
               condition = (now.unixtime() < uCopyValue[1]) ? true : false;
               if (condition)
               {
-                if (progAct[i] < 6)
-                  statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
-                else if (progAct[i] >= 6)
-                  statusBuffer[uselessNumberParser(progAct[i])] = MATI;
+                if (progAct[i] < 5)
+                  statusBuffer[progAct[i] - 1] = MURUP;
+                else if (progAct[i] >= 5)
+                  statusBuffer[progAct[i] - 5] = MATI;
                 progFlag[i] = true;
               }
               else if (progFlag[i])
               {
-                if (progAct[i] < 6)
-                  statusBuffer[uselessNumberParser(progAct[i])] = MATI;
-                else if (progAct[i] >= 6)
-                  statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
+                if (progAct[i] < 5)
+                  statusBuffer[progAct[i] - 1] = MURUP;
+                else if (progAct[i] >= 5)
+                  statusBuffer[progAct[i] - 5] = MATI;
                 progFlag[i] = false;
               }
             }
@@ -1045,18 +1004,18 @@ void programScan(void)
             condition = (uCopyValue[2] >= uCopyValue[0] && uCopyValue[2] <= uCopyValue[1]) ? true : false;
             if (condition)
             {
-              if (progAct[i] < 6)
-                statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
-              else if (progAct[i] >= 6)
-                statusBuffer[uselessNumberParser(progAct[i])] = MATI;
+              if (progAct[i] < 5)
+                statusBuffer[progAct[i] - 1] = MURUP;
+              else if (progAct[i] >= 5)
+                statusBuffer[progAct[i] - 5] = MATI;
               progFlag[i] = true;
             }
             else if (progFlag[i])
             {
-              if (progAct[i] < 6)
-                statusBuffer[uselessNumberParser(progAct[i])] = MATI;
-              else if (progAct[i] >= 6)
-                statusBuffer[uselessNumberParser(progAct[i])] = MURUP;
+              if (progAct[i] < 5)
+                statusBuffer[progAct[i] - 1] = MURUP;
+              else if (progAct[i] >= 5)
+                statusBuffer[progAct[i] - 5] = MATI;
               progFlag[i] = false;
             }
           }
@@ -1065,30 +1024,40 @@ void programScan(void)
         {
           if (progRB2[i][0] != 0)
           {
-            if (progRB1[i][0] == 1)
+            if (progRB1[i][0] == 0)
               condition = (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
-            else if (progRB1[i][0] == 2)
+            else if (progRB1[i][0] == 1)
               condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
-            else if (progRB1[i][0] == 3)
+            else if (progRB1[i][0] == 2)
               condition = (bitRead(deviceStatus, BITPOS_AUX3_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
-            else if (progRB1[i][0] == 4)
+            else if (progRB1[i][0] == 3)
               condition = (bitRead(deviceStatus, BITPOS_AUX4_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else
               condition = false;
             if (condition)
             {
-              if (progAct[i] == 1 || progAct[i] == 6)
-                statusBuffer[2] = (progAct[i] == 1) ? MURUP : MATI;
-              if (progAct[i] == 2 || progAct[i] == 7)
-                statusBuffer[3] = (progAct[i] == 2) ? MURUP : MATI;
-              if (progAct[i] == 3 || progAct[i] == 8)
-                statusBuffer[0] = (progAct[i] == 3) ? MURUP : MATI;
-              if (progAct[i] == 4 || progAct[i] == 9)
-                statusBuffer[1] = (progAct[i] == 4) ? MURUP : MATI;
-              if (progAct[i] == 5 || progAct[i] == 10)
-                statusBuffer[4] = (progAct[i] == 5) ? MURUP : MATI;
+              if (progAct[i] == 1 || progAct[i] == 5)
+                statusBuffer[0] = (progAct[i] == 1) ? MURUP : MATI;
+              if (progAct[i] == 2 || progAct[i] == 6)
+                statusBuffer[1] = (progAct[i] == 2) ? MURUP : MATI;
+              if (progAct[i] == 3 || progAct[i] == 7)
+                statusBuffer[2] = (progAct[i] == 3) ? MURUP : MATI;
+              if (progAct[i] == 4 || progAct[i] == 8)
+                statusBuffer[3] = (progAct[i] == 4) ? MURUP : MATI;
             }
           }
+        }
+        else if (progTrig[i] == 6 || progTrig[i] == 7 || progTrig[i] == 8)
+        {
+          float aturKe, toleransi;
+          memcpy(&aturKe, &progRB1[i], sizeof(float));
+          memcpy(&toleransi, &progRB2[i], sizeof(float));
+          bool hysteresisBuffer;
+          if (((progTrig[i] == 6 || progTrig[i] == 7) ? newTemp : newHumid) > aturKe + (toleransi / 2))
+            hysteresisBuffer = ((progTrig[i] == 7) ? MURUP : MATI);
+          else if (((progTrig[i] == 6 || progTrig[i] == 7) ? newTemp : newHumid) < aturKe - (toleransi / 2))
+            hysteresisBuffer = ((progTrig[i] == 7) ? MATI : MURUP);
+          statusBuffer[progAct[i]] = hysteresisBuffer;
         }
       }
     }
