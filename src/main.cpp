@@ -67,7 +67,6 @@ Keterangan Pin :
 #include <WiFiUdp.h>
 #include <time.h>
 #include <constants.h>
-#include <PID_v1.h>
 #include <ESP8266httpUpdate.h>
 
 #include <Ticker.h>
@@ -183,33 +182,7 @@ bool disconnectFlag,
     bit595Status;
 
 float newTemp,
-    newHumid,
-
-    thermalSetPoint,
-
-    heaterKp,
-    heaterKi,
-    heaterKd,
-    heaterDs,
-    heaterPidOutput;
-unsigned long heaterWindowStart;
-PID heaterPID(&newTemp, &heaterPidOutput, &thermalSetPoint, heaterKp, heaterKi, heaterKd, DIRECT);
-
-bool heaterHysteresis;
-float heaterBa,
-    heaterBb,
-
-    coolerKp,
-    coolerKi,
-    coolerKd,
-    coolerDs,
-    coolerPidOutput;
-unsigned long coolerWindowStart;
-PID coolerPID(&newTemp, &coolerPidOutput, &thermalSetPoint, coolerKp, coolerKi, coolerKd, REVERSE);
-
-float coolerBa,
-    coolerBb;
-bool coolerHysteresis;
+    newHumid;
 
 byte progTrig[30],
     progRB1[30][4],
@@ -236,8 +209,7 @@ byte activeProg[30];
 // Page 1 dynamics
 // suhu,humid and sp respectively
 float prev_newTemp,
-    prev_newHumid,
-    prev_thermalSetPoint;
+    prev_newHumid;
 bool prev_wifiStatus;
 
 // Page 2 dynamics
@@ -246,34 +218,8 @@ bool prev_wifiStatus;
 // int prev_year;
 
 // Page 3 dynamics
-// 0 is pemanas, 1 is pendingin, 2 is out1, 3 is out1, 4 is out2
 bool prev_outStatus[4];
 
-// Page 4 dynamics
-// 0 is tc status, 1 is tc mode
-bool prev_tcStatus,
-    prev_tcOperation;
-byte prev_tcMode;
-
-// Page 5 dynamics
-bool prev_htMode;
-//BA, BB, KP ,KI ,KD ,DS respectively
-float prev_heaterKp,
-    prev_heaterKi,
-    prev_heaterKd,
-    prev_heaterDs,
-    prev_heaterBa,
-    prev_heaterBb;
-
-// Page 6 dynamics
-bool prev_clMode;
-//BA, BB, KP ,KI ,KD ,DS respectively
-float prev_coolerKp,
-    prev_coolerKi,
-    prev_coolerKd,
-    prev_coolerDs,
-    prev_coolerBa,
-    prev_coolerBb;
 char lcdRowBuffer[4][20];
 
 // Page 7 had no dynamics
@@ -354,6 +300,7 @@ void setup(void)
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Men-setup sistem");
+    lcd.setCursor(0, 1);
     lcd.print("Tunggu sebentar");
     byte zeroBlank[PROG_LENGTH];
     std::fill_n(zeroBlank, PROG_LENGTH, 0);
@@ -472,9 +419,6 @@ void setup(void)
   loadAllPrograms();
   ds18b.requestTemperatures(); // Send the command to get temperatures
   newTemp = ds18b.getTempCByIndex(0);
-
-  heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
-  coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
 
   byteWrite595(0x00);
   programStarted = false;
@@ -650,9 +594,8 @@ void loop(void)
         doc[F("unix")] = now.unixtime();
         doc[F("a1")] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
         doc[F("a2")] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
-        doc[F("tc")] = bitRead(deviceStatus, BITPOS_TC_STATUS);
-        doc[F("ht")] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
-        doc[F("cl")] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
+        doc[F("a3")] = bitRead(deviceStatus, BITPOS_AUX3_STATUS);
+        doc[F("a4")] = bitRead(deviceStatus, BITPOS_AUX4_STATUS);
 
         JsonArray data = doc.createNestedArray("data");
         data.add(newTemp);
@@ -687,108 +630,18 @@ void loop(void)
                 statusBuzzer.setInterval(300);
                 statusBuzzer.disableAfter(301);
                 byte *buffer = (byte *)malloc(4);
-                if (out["setpoint"])
-                {
-                  float ibuffer = out["setpoint"].as<float>();
-                  thermalSetPoint = ibuffer;
-                  Serial.printf("Received Setpoint Update!\nthermalSetPoint : %f\n", thermalSetPoint);
-                  memcpy(buffer, &ibuffer, 4);
-                  eeprom.writeBytes(ADDR_THERMAL_SETPOINT, 4, buffer);
-                }
-                if (out["hpam"])
-                {
-                  float fbuffer = out["hpam"][0].as<float>(); // Kp
-                  heaterKp = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_HEATER_KP, 4, buffer);
-                  fbuffer = out["hpam"][1].as<float>(); // Ki
-                  heaterKi = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_HEATER_KI, 4, buffer);
-                  fbuffer = out["hpam"][2].as<float>(); // Kd
-                  heaterKd = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_HEATER_KD, 4, buffer);
-                  fbuffer = out["hpam"][3].as<float>(); // Ds
-                  heaterDs = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_HEATER_DS, 4, buffer);
-                  fbuffer = out["hpam"][4].as<float>(); // Ba
-                  heaterBa = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_HEATER_BA, 4, buffer);
-                  fbuffer = out["hpam"][5].as<float>(); // Bb
-                  heaterBb = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_HEATER_BB, 4, buffer);
-                  Serial.println(out["hmd"].as<bool>());
-                  bitWrite(htclMode, BITPOS_HEATER_MODE, out["hmd"].as<bool>());
-                  eeprom.writeByte(ADDR_HTCL_MODE, htclMode);
-                  delay(10);
-                  heaterPID.SetTunings(heaterKp, heaterKi, heaterKd);
-                  Serial.printf("Received Heater Param Update!\nhHeater Mode : %s\nheaterKp : %f\nheaterKi : %f\nheaterKd : %f\nheaterDs : %f\nheaterBa : %f\nheaterBb : %f\n", (bitRead(htclMode, BITPOS_HEATER_MODE)) ? "Hysteresis" : "PID", heaterKp, heaterKi, heaterKd, heaterDs, heaterBa, heaterBb);
-                }
-                if (out["cpam"])
-                {
-                  float fbuffer = out["cpam"][0].as<float>(); // Kp
-                  coolerKp = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_COOLER_KP, 4, buffer);
-                  fbuffer = out["cpam"][1].as<float>(); // Ki
-                  coolerKi = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_COOLER_KI, 4, buffer);
-                  fbuffer = out["cpam"][2].as<float>(); // Kd
-                  coolerKd = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_COOLER_KD, 4, buffer);
-                  fbuffer = out["cpam"][3].as<float>(); // Ds
-                  coolerDs = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_COOLER_DS, 4, buffer);
-                  fbuffer = out["cpam"][4].as<float>(); // Ba
-                  coolerBa = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_COOLER_BA, 4, buffer);
-                  fbuffer = out["cpam"][5].as<float>(); // Bb
-                  coolerBb = fbuffer;
-                  memcpy(buffer, &fbuffer, 4);
-                  eeprom.writeBytes(ADDR_COOLER_BB, 4, buffer);
-                  Serial.println(out["cmd"].as<bool>());
-                  bitWrite(htclMode, BITPOS_COOLER_MODE, out["cmd"].as<bool>());
-                  eeprom.writeByte(ADDR_HTCL_MODE, htclMode);
-                  coolerPID.SetTunings(coolerKp, coolerKi, coolerKd);
-                  delay(10);
-                  // writeByte mode
-                  Serial.printf("Received Cooler Param Update!\nCooler Mode : %s\ncoolerKp : %f\ncoolerKi : %f\ncoolerKd : %f\ncoolerDs : %f\ncoolerBa : %f\ncoolerBb : %f\n", (bitRead(htclMode, BITPOS_COOLER_MODE)) ? "Hysteresis" : "PID", coolerKp, coolerKi, coolerKd, coolerDs, coolerBa, coolerBb);
-                }
                 if (out["st"])
                 {
                   if (!out["auxStatus1"].isNull())
                     bitWrite(deviceStatus, BITPOS_AUX1_STATUS, out["auxStatus1"].as<bool>());
                   if (!out["auxStatus2"].isNull())
                     bitWrite(deviceStatus, BITPOS_AUX2_STATUS, out["auxStatus2"].as<bool>());
-                  if (!out["thStatus"].isNull())
-                  {
-                    bitWrite(deviceStatus, BITPOS_TC_STATUS, out["thStatus"].as<bool>());
-                    eeprom.writeByte(ADDR_DEVICE_STATUS, deviceStatus);
-                  }
-                  if (!out["htStatus"].isNull())
-                    bitWrite(deviceStatus, BITPOS_HEATER_STATUS, out["htStatus"].as<bool>());
-                  if (!out["clStatus"].isNull())
-                    bitWrite(deviceStatus, BITPOS_COOLER_STATUS, out["clStatus"].as<bool>());
+                  if (!out["auxStatus3"].isNull())
+                    bitWrite(deviceStatus, BITPOS_AUX3_STATUS, out["auxStatus3"].as<bool>());
+                  if (!out["auxStatus4"].isNull())
+                    bitWrite(deviceStatus, BITPOS_AUX4_STATUS, out["auxStatus4"].as<bool>());
                   delay(10);
-                  Serial.printf("Received Status Update\nAux Status 1 : %d\nAux Status 2 : %d\nThermocontrol Status : %d\nHeater Status : %d\nCooler Status : %d\n", bitRead(deviceStatus, BITPOS_AUX1_STATUS), bitRead(deviceStatus, BITPOS_AUX2_STATUS), bitRead(deviceStatus, BITPOS_TC_STATUS), bitRead(deviceStatus, BITPOS_HEATER_STATUS), bitRead(deviceStatus, BITPOS_COOLER_STATUS));
-                }
-                if (out["tcm"])
-                {
-                  //
-                  bitWrite(deviceStatus, BITPOS_TC_OPERATION, out["tcm"][0].as<bool>());
-                  bitWrite(deviceStatus, BITPOS_TC_MODE_B0, out["tcm"][1].as<bool>());
-                  bitWrite(deviceStatus, BITPOS_TC_MODE_B1, out["tcm"][2].as<bool>());
-                  eeprom.writeByte(ADDR_DEVICE_STATUS, deviceStatus);
-                  delay(10);
-                  Serial.printf("Received Thermalcontroller Update\nTherco Operation : %s\nTherco Mode %s\n", (bitRead(deviceStatus, BITPOS_TC_OPERATION)) ? "AUTO" : "MANUAL", (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "HEATER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "COOLER" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "DUAL" : "INVALID");
+                  Serial.printf("Received Status Update\nAux 1 Status : %d\nAux 2 Status : %d\nAux 3 Status : %d\nAux 4 Status : %d\n", bitRead(deviceStatus, BITPOS_AUX1_STATUS), bitRead(deviceStatus, BITPOS_AUX2_STATUS), bitRead(deviceStatus, BITPOS_AUX3_STATUS), bitRead(deviceStatus, BITPOS_AUX4_STATUS));
                 }
                 if (out["prog"])
                 {
@@ -1039,13 +892,12 @@ void programScan(void)
       //Constrain the value of lcdCursor according to each lcdScreen limit
       if (lcdScreen == 1)
         encUpperLimit = 0;
-      else if (lcdScreen == 3)
+      else if (lcdScreen == 3 || lcdScreen == 2)
         encUpperLimit = 4;
-      else if (lcdScreen == 2 || lcdScreen == 4)
+      else if (lcdScreen == 4)
         encUpperLimit = 5;
       else if (lcdScreen == 6 || lcdScreen == 5)
         encUpperLimit = 7;
-
       if (lcdCursor < encLowerLimit)
         lcdCursor = encLowerLimit;
       if (lcdCursor > encUpperLimit)
@@ -1061,12 +913,10 @@ void programScan(void)
         if (lcdCursor == 0)
           lcdTransition(3);
         else if (lcdCursor == 1)
-          lcdTransition(4);
-        else if (lcdCursor == 2)
           lcdTransition(8);
-        else if (lcdCursor == 3)
+        else if (lcdCursor == 2)
           lcdTransition(7);
-        else if (lcdCursor == 4)
+        else if (lcdCursor == 3)
           lcdTransition(1);
         else if (lcdCursor == 5)
         {
@@ -1117,81 +967,10 @@ void programScan(void)
     statusLED.update();
     statusBuzzer.update();
     bool statusBuffer[10];
-    // 0 is heater, 1 is cooler, 2 is aux1, 3 is aux2
-    // The algorithm that set PID Mode is just straight, the ifs is not there
-    statusBuffer[0] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
-    statusBuffer[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
-    statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
-    statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
-    statusBuffer[4] = bitRead(deviceStatus, BITPOS_TC_STATUS);
-    bool hcon =
-        ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-         (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1));
-    bool ccon =
-        ((bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ||
-         (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1));
-    bool tcactive =
-        (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO &&
-         bitRead(deviceStatus, BITPOS_TC_STATUS) == true);
-
-    if (tcactive && bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_PID && hcon)
-    {
-      if (heaterPID.GetMode() == MANUAL)
-        heaterPID.SetMode(AUTOMATIC);
-      heaterPID.Compute();
-      if (millis() - heaterWindowStart > (unsigned long)heaterDs)
-      {
-        //time to shift the Relay Window
-        heaterWindowStart += (unsigned long)heaterDs;
-      }
-
-      float copyOutput = heaterPidOutput;
-      if (copyOutput <= 0)
-        copyOutput = 0.01;
-      if ((unsigned long)((copyOutput * (heaterDs / 255.0))) < millis() - heaterWindowStart)
-        statusBuffer[0] = MATI;
-      else
-        statusBuffer[0] = MURUP;
-    }
-    else if (tcactive && bitRead(htclMode, BITPOS_HEATER_MODE) == MODE_HYSTERESIS && hcon)
-    { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
-      if (heaterPID.GetMode() == AUTOMATIC)
-        heaterPID.SetMode(MANUAL);
-      if (newTemp >= thermalSetPoint + heaterBa)
-        heaterHysteresis = MATI;
-      else if (newTemp <= thermalSetPoint - heaterBb)
-        heaterHysteresis = MURUP;
-      statusBuffer[0] = heaterHysteresis;
-    }
-
-    if (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_PID && tcactive && ccon)
-    {
-      if (coolerPID.GetMode() == MANUAL)
-        coolerPID.SetMode(AUTOMATIC);
-      coolerPID.Compute();
-      if (millis() - coolerWindowStart > (unsigned long)coolerDs)
-      {
-        //time to shift the Relay Window
-        coolerWindowStart += (unsigned long)coolerDs;
-      }
-      float copyOutput = coolerPidOutput;
-      if (copyOutput <= 0)
-        copyOutput = 0.01;
-      if ((unsigned long)(coolerPidOutput * (coolerDs / 255.0)) < millis() - coolerWindowStart)
-        statusBuffer[1] = MATI;
-      else
-        statusBuffer[1] = MURUP;
-    }
-    else if (bitRead(htclMode, BITPOS_COOLER_MODE) == MODE_HYSTERESIS && tcactive && ccon)
-    { // PID MANUAL DOESNT IMPLY THAT HEATER IS HYSTERESIS, WE STILL NEED TO CHECK IF IT WAS ENABLED OR NOT (TC MODE, OPERATION ETC)
-      if (coolerPID.GetMode() == AUTOMATIC)
-        coolerPID.SetMode(MANUAL);
-      if (newTemp >= thermalSetPoint + coolerBa)
-        coolerHysteresis = MURUP;
-      else if (newTemp <= thermalSetPoint - coolerBb)
-        coolerHysteresis = MATI;
-      statusBuffer[1] = coolerHysteresis;
-    }
+    statusBuffer[0] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
+    statusBuffer[1] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
+    statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX3_STATUS);
+    statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX4_STATUS);
 
     for (int i = 0; i < 30; i++)
     {
@@ -1291,11 +1070,9 @@ void programScan(void)
             else if (progRB1[i][0] == 2)
               condition = (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else if (progRB1[i][0] == 3)
-              condition = (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
+              condition = (bitRead(deviceStatus, BITPOS_AUX3_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else if (progRB1[i][0] == 4)
-              condition = (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
-            else if (progRB1[i][0] == 5)
-              condition = (bitRead(deviceStatus, BITPOS_TC_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
+              condition = (bitRead(deviceStatus, BITPOS_AUX4_STATUS) == ((progRB2[i][0] == 1) ? MURUP : MATI));
             else
               condition = false;
             if (condition)
@@ -1316,20 +1093,14 @@ void programScan(void)
       }
     }
 
-    if (!bitRead(deviceStatus, BITPOS_TC_STATUS))
-    {
-      statusBuffer[0] = MATI;
-      statusBuffer[1] = MATI;
-    }
-    bitWrite595(SFT_HEATER_RELAY, statusBuffer[0]);
-    bitWrite595(SFT_COOLER_RELAY, statusBuffer[1]);
-    bitWrite595(SFT_AUX1_RELAY, statusBuffer[2]);
-    bitWrite595(SFT_AUX2_RELAY, statusBuffer[3]);
-    bitWrite(deviceStatus, BITPOS_HEATER_STATUS, statusBuffer[0]);
-    bitWrite(deviceStatus, BITPOS_COOLER_STATUS, statusBuffer[1]);
-    bitWrite(deviceStatus, BITPOS_AUX1_STATUS, statusBuffer[2]);
-    bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[3]);
-    bitWrite(deviceStatus, BITPOS_TC_STATUS, statusBuffer[4]);
+    bitWrite595(SFT_AUX1_RELAY, statusBuffer[0]);
+    bitWrite595(SFT_AUX2_RELAY, statusBuffer[1]);
+    bitWrite595(SFT_AUX3_RELAY, statusBuffer[2]);
+    bitWrite595(SFT_AUX4_RELAY, statusBuffer[3]);
+    bitWrite(deviceStatus, BITPOS_AUX1_STATUS, statusBuffer[0]);
+    bitWrite(deviceStatus, BITPOS_AUX2_STATUS, statusBuffer[1]);
+    bitWrite(deviceStatus, BITPOS_AUX3_STATUS, statusBuffer[2]);
+    bitWrite(deviceStatus, BITPOS_AUX4_STATUS, statusBuffer[3]);
     // free(statusBuffer);
   }
 }
@@ -1359,10 +1130,6 @@ void lcdTransition(int screen, int progNum)
     lcd.printf("%s", (isWifiConnected()) ? "ONLINE" : "OFFLINE");
     lcd.setCursor(0, 1);
     lcd.printf("Hmdt:    %2.0f%%", newHumid);
-    lcd.setCursor(0, 2);
-    lcd.printf("SP  : %04.1f", thermalSetPoint);
-    lcd.print(LCD_DEGREE); // print [degree] character
-    lcd.print("C");
     lcd.setCursor(0, 3);
     lcd.print(LCD_ARROW);
     lcd.print("Menu");
@@ -1384,52 +1151,15 @@ void lcdTransition(int screen, int progNum)
   {
     lcd.setCursor(0, 0);
     lcd.print(LCD_ARROW);
-    lcd.printf("Pemanas:%s", (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == MURUP) ? "ON" : "OFF");
-    lcd.setCursor(16, 0);
-    lcd.print("Back");
-    lcd.setCursor(1, 1);
-    lcd.printf("Pendngin:%s", (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == MURUP) ? "ON" : "OFF");
-    lcd.setCursor(1, 2);
     lcd.printf("Output 1:%s", (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == MURUP) ? "ON" : "OFF");
-    lcd.setCursor(1, 3);
-    lcd.printf("Output 2:%s", (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == MURUP) ? "ON" : "OFF");
-  }
-  else if (screen == 4)
-  {
-    lcd.setCursor(0, 0);
-    lcd.print(LCD_ARROW);
-    lcd.printf("Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
-    sprintf(lcdRowBuffer[0], "Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
-    lcd.setCursor(1, 1);
-    lcd.printf("Mode   :%s",
-               (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Dual" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Cool" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "Heat" : "");
-    sprintf(lcdRowBuffer[1], "Mode   :%s",
-            (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 1 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Dual" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 1) ? "Cool" : (bitRead(deviceStatus, BITPOS_TC_MODE_B0) == 0 && bitRead(deviceStatus, BITPOS_TC_MODE_B1) == 0) ? "Heat" : "");
-    lcd.setCursor(1, 2);
-    lcd.printf("Operasi:%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
-    sprintf(lcdRowBuffer[2], "Operasi:%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
-    lcd.setCursor(1, 3);
-    lcd.print("Opsi Pemanas");
-    sprintf(lcdRowBuffer[3], "Opsi Pemanas");
     lcd.setCursor(16, 0);
     lcd.print("Back");
-  }
-  else if (screen == 5 || screen == 6)
-  {
-    lcdCursorBackPos = 7;
-    lcd.setCursor(0, 0);
-    lcd.print((screen == 5) ? "Pemanas         Back" : "Pendingin       Back");
-    sprintf(lcdRowBuffer[0], (screen == 5) ? "Pemanas         Back" : "Pendingin       Back");
-    lcd.setCursor(0, 1);
-    lcd.print(LCD_ARROW);
-    lcd.printf("Mode:%s", (bitRead(htclMode, (screen == 5) ? BITPOS_HEATER_MODE : BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
-    sprintf(lcdRowBuffer[1], "Mode:%s", (bitRead(htclMode, (screen == 5) ? BITPOS_HEATER_MODE : BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
+    lcd.setCursor(1, 1);
+    lcd.printf("Output 2:%s", (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == MURUP) ? "ON" : "OFF");
     lcd.setCursor(1, 2);
-    lcd.printf("Bts Ats:%05.2f", (screen == 5) ? heaterBa : coolerBa);
-    sprintf(lcdRowBuffer[2], "Bts Ats:%05.2f", (screen == 5) ? heaterBa : coolerBa);
+    lcd.printf("Output 3:%s", (bitRead(deviceStatus, BITPOS_AUX3_STATUS) == MURUP) ? "ON" : "OFF");
     lcd.setCursor(1, 3);
-    lcd.printf("Bts Bwh:%05.2f", (screen == 5) ? heaterBb : coolerBb);
-    sprintf(lcdRowBuffer[3], "Bts Bwh:%05.2f", (screen == 5) ? heaterBb : coolerBb);
+    lcd.printf("Output 4:%s", (bitRead(deviceStatus, BITPOS_AUX4_STATUS) == MURUP) ? "ON" : "OFF");
   }
   else if (screen == 7)
   {
@@ -1438,7 +1168,7 @@ void lcdTransition(int screen, int progNum)
     lcd.setCursor(0, 1);
     lcd.printf("Soft PW:%.12s", storedSoftWifiPass.c_str());
     lcd.setCursor(0, 2);
-    lcd.print("IP:192.168.4.1"); // this guy is the same every esp, so its fine to hardcode
+    lcd.print("IP:192.168.4.1"); // this guy is the same on every ESP, so its fine to hardcode
     lcd.setCursor(0, 3);
     lcd.printf("Ver:%s", BUILD_VERSION);
     lcd.setCursor(15, 3);
@@ -1579,11 +1309,6 @@ void lcdUpdate()
       lcd.setCursor(9, 1);
       lcd.printf("%2.0f%%", newHumid);
     }
-    if (prev_thermalSetPoint != thermalSetPoint)
-    {
-      lcd.setCursor(6, 2);
-      lcd.printf("%05.1f", thermalSetPoint);
-    }
     if (prev_wifiStatus != isWifiConnected())
     {
       lcd.setCursor(13, 0);
@@ -1597,8 +1322,6 @@ void lcdUpdate()
     {
       lcd.setCursor(0, 0);
       lcd.print(" ");
-      lcd.setCursor(0, 1);
-      lcd.print(" ");
       lcd.setCursor(0, 2);
       lcd.print(" ");
       lcd.setCursor(0, 3);
@@ -1610,14 +1333,12 @@ void lcdUpdate()
       if (lcdCursor == 0)
         lcd.setCursor(0, 0);
       else if (lcdCursor == 1)
-        lcd.setCursor(0, 1);
-      else if (lcdCursor == 2)
         lcd.setCursor(0, 2);
-      else if (lcdCursor == 3)
+      else if (lcdCursor == 2)
         lcd.setCursor(0, 3);
-      else if (lcdCursor == 4)
+      else if (lcdCursor == 3)
         lcd.setCursor(12, 0);
-      else if (lcdCursor == 5)
+      else if (lcdCursor == 4)
         lcd.setCursor(12, 1);
       lcd.print(LCD_ARROW);
     }
@@ -1654,194 +1375,25 @@ void lcdUpdate()
         lcd.setCursor(15, 0);
       lcd.print(LCD_ARROW);
     }
-    if (prev_outStatus[0] != bitRead(deviceStatus, BITPOS_HEATER_STATUS))
+    if (prev_outStatus[0] != bitRead(deviceStatus, BITPOS_AUX1_STATUS))
     {
       lcd.setCursor(9, 0);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_HEATER_STATUS) == MURUP) ? "ON" : "OFF");
-    }
-    if (prev_outStatus[1] != bitRead(deviceStatus, BITPOS_COOLER_STATUS))
-    {
-      lcd.setCursor(9, 1);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_COOLER_STATUS) == MURUP) ? "ON" : "OFF");
-    }
-    if (prev_outStatus[2] != bitRead(deviceStatus, BITPOS_AUX1_STATUS))
-    {
-      lcd.setCursor(9, 2);
       lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == MURUP) ? "ON" : "OFF");
     }
-    if (prev_outStatus[3] != bitRead(deviceStatus, BITPOS_AUX2_STATUS))
-    {
-      lcd.setCursor(9, 3);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == MURUP) ? "ON" : "OFF");
-    }
-  }
-  else if (lcdScreen == 4)
-  {
-    byte modeBuffer;
-    bitWrite(modeBuffer, 0, bitRead(deviceStatus, BITPOS_TC_MODE_B0));
-    bitWrite(modeBuffer, 1, bitRead(deviceStatus, BITPOS_TC_MODE_B1));
-    if (prev_tcStatus != bitRead(deviceStatus, BITPOS_TC_STATUS))
-    {
-      lcd.setCursor(9, 0);
-      lcd.print("   ");
-      lcd.setCursor(9, 0);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
-      if (lcdCursor < 4)
-        sprintf(lcdRowBuffer[0], "Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
-    }
-    if (prev_tcMode != modeBuffer)
+    if (prev_outStatus[1] != bitRead(deviceStatus, BITPOS_AUX2_STATUS))
     {
       lcd.setCursor(9, 1);
-      lcd.printf("%s", (modeBuffer == 3) ? "Dual" : (modeBuffer == 1) ? "Cool" : (modeBuffer == 0) ? "Heat" : "");
-      sprintf(lcdRowBuffer[1 - lcdRowPos], "Mode   :%s", (modeBuffer == 3) ? "Dual" : (modeBuffer == 1) ? "Cool" : (modeBuffer == 0) ? "Heat" : "");
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == MURUP) ? "ON" : "OFF");
     }
-    if (prev_tcOperation != bitRead(deviceStatus, BITPOS_TC_OPERATION))
+    if (prev_outStatus[2] != bitRead(deviceStatus, BITPOS_AUX3_STATUS))
     {
       lcd.setCursor(9, 2);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
-      sprintf(lcdRowBuffer[2 - lcdRowPos], "Operasi:%s", (bitRead(deviceStatus, BITPOS_TC_OPERATION) == MODE_OPERATION_AUTO) ? "Auto" : "Manual");
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX3_STATUS) == MURUP) ? "ON" : "OFF");
     }
-    if (prev_lcdCursor != lcdCursor)
+    if (prev_outStatus[3] != bitRead(deviceStatus, BITPOS_AUX4_STATUS))
     {
-      if (prev_lcdCursor == 3 && lcdCursor == 4 && lcdRowPos == 0)
-      {
-        lcdRowPos = 1;
-        lcd.clear();
-        memcpy(&lcdRowBuffer[0], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
-        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
-        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[3], sizeof lcdRowBuffer[3]);
-        sprintf(lcdRowBuffer[3], "Opsi Pendingin");
-        lcd.setCursor(1, 0);
-        lcd.print(lcdRowBuffer[0]);
-        lcd.setCursor(1, 1);
-        lcd.print(lcdRowBuffer[1]);
-        lcd.setCursor(1, 2);
-        lcd.print(lcdRowBuffer[2]);
-        lcd.setCursor(1, 3);
-        lcd.print(lcdRowBuffer[3]);
-        lcd.setCursor(16, 0);
-        lcd.print("Back");
-      }
-      else if (prev_lcdCursor == 1 && lcdCursor == 0 && lcdRowPos == 1)
-      {
-        lcdRowPos = 0;
-        lcd.clear();
-        memcpy(&lcdRowBuffer[3], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
-        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
-        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[0], sizeof lcdRowBuffer[0]);
-        sprintf(lcdRowBuffer[0], "Status :%s", (bitRead(deviceStatus, BITPOS_TC_STATUS) == MURUP) ? "ON" : "OFF");
-        lcd.setCursor(1, 0);
-        lcd.print(lcdRowBuffer[0]);
-        lcd.setCursor(1, 1);
-        lcd.print(lcdRowBuffer[1]);
-        lcd.setCursor(1, 2);
-        lcd.print(lcdRowBuffer[2]);
-        lcd.setCursor(1, 3);
-        lcd.print(lcdRowBuffer[3]);
-        lcd.setCursor(16, 0);
-        lcd.print("Back");
-      }
-
-      lcd.setCursor(0, 0);
-      lcd.print(" ");
-      lcd.setCursor(0, 1);
-      lcd.print(" ");
-      lcd.setCursor(0, 2);
-      lcd.print(" ");
-      lcd.setCursor(0, 3);
-      lcd.print(" ");
-      lcd.setCursor(15, 0);
-      lcd.print(" ");
-      if (lcdCursor == 5)
-        lcd.setCursor(15, 0);
-      else if (lcdCursor == 4)
-        lcd.setCursor(0, 3);
-      else if (lcdCursor == 3)
-        lcd.setCursor(0, 3 - lcdRowPos);
-      else if (lcdCursor == 2)
-        lcd.setCursor(0, 2 - lcdRowPos);
-      else if (lcdCursor == 1)
-        lcd.setCursor(0, 1 - lcdRowPos);
-      else if (lcdCursor == 0)
-        lcd.setCursor(0, 0);
-      lcd.print(LCD_ARROW);
-    }
-  }
-  else if (lcdScreen == 5 || lcdScreen == 6)
-  {
-    if (prev_lcdCursor != lcdCursor)
-    {
-      if (prev_lcdCursor == 2 + lcdRowPos && lcdCursor == 3 + lcdRowPos && lcdCursor != lcdCursorBackPos)
-      { // Scroll down
-        lcdRowPos++;
-        lcd.clear();
-        memcpy(&lcdRowBuffer[0], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
-        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
-        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[3], sizeof lcdRowBuffer[3]);
-        if (lcdRowPos == 1)
-          sprintf(lcdRowBuffer[3], "Kp:%05.2f", (lcdScreen == 5) ? heaterKp : coolerKp);
-        else if (lcdRowPos == 2)
-          sprintf(lcdRowBuffer[3], "Ki:%05.2f", (lcdScreen == 5) ? heaterKi : coolerKi);
-        else if (lcdRowPos == 3)
-          sprintf(lcdRowBuffer[3], "Kd:%05.2f", (lcdScreen == 5) ? heaterKd : coolerKd);
-        else if (lcdRowPos == 4)
-          sprintf(lcdRowBuffer[3], "Durasi:%04.0f ms", (lcdScreen == 5) ? heaterDs : coolerDs);
-        lcd.setCursor(1, 0);
-        lcd.print(lcdRowBuffer[0]);
-        lcd.setCursor(1, 1);
-        lcd.print(lcdRowBuffer[1]);
-        lcd.setCursor(1, 2);
-        lcd.print(lcdRowBuffer[2]);
-        lcd.setCursor(1, 3);
-        lcd.print(lcdRowBuffer[3]);
-        lcd.setCursor(16, 0);
-        lcd.print("Back");
-      }
-      if (prev_lcdCursor == lcdRowPos && lcdCursor == lcdRowPos - 1 && lcdRowPos != 0)
-      {
-        lcdRowPos--;
-        lcd.clear();
-        memcpy(&lcdRowBuffer[3], &lcdRowBuffer[2], sizeof lcdRowBuffer[2]);
-        memcpy(&lcdRowBuffer[2], &lcdRowBuffer[1], sizeof lcdRowBuffer[1]);
-        memcpy(&lcdRowBuffer[1], &lcdRowBuffer[0], sizeof lcdRowBuffer[0]);
-        if (lcdRowPos == 0)
-          sprintf(lcdRowBuffer[0], (lcdScreen == 5) ? "Pemanas" : "Pendingin");
-        else if (lcdRowPos == 1)
-          sprintf(lcdRowBuffer[0], "Mode:%s", (bitRead(htclMode, (lcdScreen == 5) ? BITPOS_HEATER_MODE : BITPOS_COOLER_MODE) == MODE_PID) ? "PID" : "HYS");
-        else if (lcdRowPos == 2)
-          sprintf(lcdRowBuffer[0], "Bts Ats:%05.2f", (lcdScreen == 5) ? heaterBa : coolerBa);
-        else if (lcdRowPos == 3)
-          sprintf(lcdRowBuffer[0], "Bts Bwh:%05.2f", (lcdScreen == 5) ? heaterBb : coolerBb);
-        lcd.setCursor((strcmp(lcdRowBuffer[0], (lcdScreen == 5) ? "Pemanas" : "Pendingin") == 0) ? 0 : 1, 0);
-        lcd.print(lcdRowBuffer[0]);
-        lcd.setCursor(1, 1);
-        lcd.print(lcdRowBuffer[1]);
-        lcd.setCursor(1, 2);
-        lcd.print(lcdRowBuffer[2]);
-        lcd.setCursor(1, 3);
-        lcd.print(lcdRowBuffer[3]);
-        lcd.setCursor(16, 0);
-        lcd.print("Back");
-      }
-
-      if (lcdRowPos != 0)
-      {
-        lcd.setCursor(0, 0);
-        lcd.print(" ");
-      }
-      lcd.setCursor(0, 1);
-      lcd.print(" ");
-      lcd.setCursor(0, 2);
-      lcd.print(" ");
-      lcd.setCursor(0, 3);
-      lcd.print(" ");
-      lcd.setCursor(15, 0);
-      lcd.print(" ");
-      if (lcdCursor != lcdCursorBackPos)
-        lcd.setCursor(0, lcdCursor - lcdRowPos + 1);
-      else
-        lcd.setCursor(15, 0);
-      lcd.print(LCD_ARROW);
+      lcd.setCursor(9, 3);
+      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX4_STATUS) == MURUP) ? "ON" : "OFF");
     }
   }
   else if (lcdScreen == 8)
@@ -1910,33 +1462,12 @@ void lcdUpdate()
 
   prev_newTemp = newTemp;
   prev_newHumid = newHumid;
-  prev_thermalSetPoint = thermalSetPoint;
   prev_wifiStatus = isWifiConnected();
 
-  prev_outStatus[0] = bitRead(deviceStatus, BITPOS_HEATER_STATUS);
-  prev_outStatus[1] = bitRead(deviceStatus, BITPOS_COOLER_STATUS);
-  prev_outStatus[2] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
-  prev_outStatus[3] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
-
-  prev_tcStatus = bitRead(deviceStatus, BITPOS_TC_STATUS);
-  prev_tcOperation = bitRead(deviceStatus, BITPOS_TC_OPERATION);
-  bitWrite(prev_tcMode, 0, bitRead(deviceStatus, BITPOS_TC_MODE_B0));
-  bitWrite(prev_tcMode, 1, bitRead(deviceStatus, BITPOS_TC_MODE_B1));
-
-  prev_clMode = bitRead(htclMode, BITPOS_COOLER_MODE);
-  prev_coolerKp = coolerKp;
-  prev_coolerKi = coolerKi;
-  prev_coolerKd = coolerKd;
-  prev_coolerDs = coolerDs;
-  prev_coolerBa = coolerBa;
-  prev_coolerBb = coolerBb;
-  prev_htMode = bitRead(htclMode, BITPOS_HEATER_MODE);
-  prev_heaterKp = heaterKp;
-  prev_heaterKi = heaterKi;
-  prev_heaterKd = heaterKd;
-  prev_heaterDs = heaterDs;
-  prev_heaterBa = heaterBa;
-  prev_heaterBb = heaterBb;
+  prev_outStatus[0] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
+  prev_outStatus[1] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
+  prev_outStatus[2] = bitRead(deviceStatus, BITPOS_AUX3_STATUS);
+  prev_outStatus[3] = bitRead(deviceStatus, BITPOS_AUX4_STATUS);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2213,21 +1744,6 @@ void loadAllPrograms()
   eeprom.readBytes(ADDR_DEVICE_STATUS, PROG_LENGTH, data);
 
   deviceStatus = data[ADDR_DEVICE_STATUS - ADDR_DEVICE_STATUS];
-  htclMode = data[ADDR_HTCL_MODE - ADDR_DEVICE_STATUS];
-  memcpy(&thermalSetPoint, &data[ADDR_THERMAL_SETPOINT - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&heaterKp, &data[ADDR_HEATER_KP - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&heaterKi, &data[ADDR_HEATER_KI - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&heaterKd, &data[ADDR_HEATER_KD - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&heaterDs, &data[ADDR_HEATER_DS - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&heaterBa, &data[ADDR_HEATER_BA - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&heaterBb, &data[ADDR_HEATER_BB - ADDR_DEVICE_STATUS], sizeof(float));
-
-  memcpy(&coolerKp, &data[ADDR_COOLER_KP - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&coolerKi, &data[ADDR_COOLER_KI - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&coolerKd, &data[ADDR_COOLER_KD - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&coolerDs, &data[ADDR_COOLER_DS - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&coolerBa, &data[ADDR_COOLER_BA - ADDR_DEVICE_STATUS], sizeof(float));
-  memcpy(&coolerBb, &data[ADDR_COOLER_BB - ADDR_DEVICE_STATUS], sizeof(float));
   for (byte i = 0; i < 30; i++)
   {
     progTrig[i] = data[ADDR_PROG_TRIGGER(i) - ADDR_DEVICE_STATUS];

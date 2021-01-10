@@ -51,10 +51,12 @@
 
 // QA to QH of 595, in sort
 #define SFT_LED_STATUS 0
-#define SFT_AUX2_RELAY 1
-#define SFT_AUX1_RELAY 2
-#define SFT_HEATER_RELAY 3
-#define SFT_COOLER_RELAY 4
+#define SFT_AUX1_RELAY 1
+#define SFT_AUX2_RELAY 2
+#define SFT_AUX3_RELAY 3
+#define SFT_AUX4_RELAY 4
+// #define SFT_HEATER_RELAY 3 DEPRECATED
+// #define SFT_COOLER_RELAY 4 DEPRECATED
 #define SFT_MUX_A 5
 #define SFT_MUX_B 6
 #define SFT_BUZZER 7
@@ -68,42 +70,43 @@
 // address 602 is 362
 #define PROG_LENGTH 366
 #define ADDR_DEVICE_STATUS 241
+// Device status contain : aux
 // 242 is deprecated int setpoint
 // 243 is deprecated int setpoint
-#define ADDR_HEATER_KP 244
-#define ADDR_HEATER_KI 248
-#define ADDR_HEATER_KD 252
-#define ADDR_HEATER_DS 256
-#define ADDR_HEATER_BA 260
-#define ADDR_HEATER_BB 264
-#define ADDR_COOLER_KP 268
-#define ADDR_COOLER_KI 272
-#define ADDR_COOLER_KD 276
-#define ADDR_COOLER_DS 280
-#define ADDR_COOLER_BA 284
-#define ADDR_COOLER_BB 288
+// #define ADDR_HEATER_KP 244 DEPRECATED
+// #define ADDR_HEATER_KI 248 DEPRECATED
+// #define ADDR_HEATER_KD 252 DEPRECATED
+// #define ADDR_HEATER_DS 256 DEPRECATED
+// #define ADDR_HEATER_BA 260 DEPRECATED
+// #define ADDR_HEATER_BB 264 DEPRECATED
+// #define ADDR_COOLER_KP 268 DEPRECATED
+// #define ADDR_COOLER_KI 272 DEPRECATED
+// #define ADDR_COOLER_KD 276 DEPRECATED
+// #define ADDR_COOLER_DS 280 DEPRECATED
+// #define ADDR_COOLER_BA 284 DEPRECATED
+// #define ADDR_COOLER_BB 288 DEPRECATED
 #define ADDR_PROG_TRIGGER(x) (292 + (x * 10))
 #define ADDR_PROG_RB1(x) (293 + (x * 10))
 #define ADDR_PROG_RB2(x) (297 + (x * 10))
 #define ADDR_PROG_ACTION(x) (301 + (x * 10))
-#define ADDR_HTCL_MODE 602
-#define ADDR_THERMAL_SETPOINT 603
+// #define ADDR_HTCL_MODE 602 DEPRECATED
+// #define ADDR_THERMAL_SETPOINT 603 DEPRECATED
 
 #define BITPOS_AUX1_STATUS 0
 #define BITPOS_AUX2_STATUS 1
-#define BITPOS_TC_STATUS 2
-#define BITPOS_TC_OPERATION 3 // 0 is MANUAL MODE, 1 is AUTO MODE
-#define BITPOS_TC_MODE_B0 4   // B00 is HEATER MODE, B01 is COOLER MODE
-#define BITPOS_TC_MODE_B1 5   // B11 is DUAL MODE
-#define BITPOS_HEATER_STATUS 6
-#define BITPOS_COOLER_STATUS 7
-#define BITPOS_HEATER_MODE 0 // 0 is PID MODE, 1 is HYSTERESIS MOD
-#define BITPOS_COOLER_MODE 1
+// #define BITPOS_TC_STATUS 2   DEPRECATED
+// #define BITPOS_TC_OPERATION 3 // 0 is MANUAL MODE, 1 is AUTO MODE  DEPRECATED
+// #define BITPOS_TC_MODE_B0 4   // B00 is HEATER MODE, B01 is COOLER MODE DEPRECATED
+// #define BITPOS_TC_MODE_B1 5   // B11 is DUAL MODE DEPRECATED
+#define BITPOS_AUX3_STATUS 6
+#define BITPOS_AUX4_STATUS 7
+// #define BITPOS_HEATER_MODE 0 // 0 is PID MODE, 1 is HYSTERESIS MOD DEPRECATED
+// #define BITPOS_COOLER_MODE 1  DEPRECATED
 
-#define MODE_PID 0
-#define MODE_HYSTERESIS 1
-#define MODE_OPERATION_MANUAL 0
-#define MODE_OPERATION_AUTO 1
+// #define MODE_PID 0 DEPRECATED
+// #define MODE_HYSTERESIS 1 DEPRECATED
+// #define MODE_OPERATION_MANUAL 0 DEPRECATED
+// #define MODE_OPERATION_AUTO 1 DEPRECATED
 const char baseUri[] = "www.otoma.my.id";
 static const char espUpdater[] PROGMEM = "https://www.otoma.my.id/api/ESPUpdater.php";
 static const char requestURL[] PROGMEM = "https://www.otoma.my.id/api/nexusControllerRequest.php";
