@@ -60,7 +60,8 @@ Keterangan Pin :
 */
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <WiFiClientSecure.h>
+// #include <WiFiClientSecure.h>
+#include <WiFiClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 #include <NTPClient.h>
@@ -124,9 +125,10 @@ void lcdTransition(int screen, int progNum = 0);
 void lcdUpdate();
 
 HTTPClient http;
-BearSSL::WiFiClientSecure *client = new BearSSL::WiFiClientSecure();
-BearSSL::X509List cert;
-BearSSL::Session session;
+WiFiClient client;
+// BearSSL::WiFiClientSecure *client = new BearSSL::WiFiClientSecure();
+// BearSSL::X509List cert;
+// BearSSL::Session session;
 ESP8266WebServer server(80); // Create a webserver object that listens for HTTP request on port 80
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "asia.pool.ntp.org", 25200); // 25200 for UTC+7, 3600*(UTC)
@@ -337,21 +339,7 @@ void setup(void)
   loadInfo();
   //75753us
   //512006us
-
-  if (cert.append(caCert, caCertLen))
-    Serial.println("Successfully loading certificate");
-  else
-  {
-    Serial.println("Failed loading certificate!");
-    statusBuzzer.on();
-    delay(100);
-    statusBuzzer.off();
-    delay(100);
-    ESP.restart();
-  }
-  client->setTrustAnchors(&cert);
-  client->setSession(&session);
-  http.setReuse(true);
+  // http.setReuse(true);
   if (ds18b.getDS18Count() == 0)
   {
     if (!bitReadFB(FB_DS_NF1))
@@ -423,6 +411,7 @@ void setup(void)
   programStarted = false;
   programScanner.attach_ms(40, programScan);
   encoderServicer.attach_ms(1, encoderService);
+
   closeClient();
   closeSoftAP();
   closeServer();
@@ -497,7 +486,6 @@ void setup(void)
     {
       Serial.println("Successfully fetching NTP Clock!");
       rtc.adjust(DateTime(timeClient.getEpochTime()));
-      client->setX509Time(timeClient.getEpochTime());
     }
     else
     {
@@ -528,13 +516,12 @@ void setup(void)
       }
       else
       {
-        client->setX509Time(rtc.now().unixtime());
         Serial.printf("Initializing client x509 time RTC : %lu", rtc.now().unixtime());
       }
     }
 
     programStarted = false;
-    t_httpUpdate_return ret = ESPhttpUpdate.update(dynamic_cast<WiFiClient &>(*client), FPSTR(espUpdater), BUILD_VERSION);
+    t_httpUpdate_return ret = ESPhttpUpdate.update(client, FPSTR(espUpdater), BUILD_VERSION);
     switch (ret)
     {
     case HTTP_UPDATE_FAILED:
@@ -721,7 +708,7 @@ void loop(void)
         Serial.println("Checking update");
         programStarted = false;
         byteWrite595(0x00);
-        t_httpUpdate_return ret = ESPhttpUpdate.update(dynamic_cast<WiFiClient &>(*client), FPSTR(espUpdater), BUILD_VERSION);
+        t_httpUpdate_return ret = ESPhttpUpdate.update(client, FPSTR(espUpdater), BUILD_VERSION);
         switch (ret)
         {
         case HTTP_UPDATE_FAILED:
@@ -1730,22 +1717,19 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
 {
   unsigned long dt = millis();
 
-  client->setX509Time(timeClient.getEpochTime());
-  // client.setInsecure();
-  // client.setCiphersLessSecure();
-  if (!client->connect(baseUri, 443))
-  {
+  // if (!client.connect(baseUri, httpPort))
+  // {
+  //   Serial.printf("Connecting takes %lums\n", millis() - dt);
+  //   Serial.println("connection failed");
+  //   responseCode = 408;
+  //   response = "";
+  //   failedRequestCount++;
+  // }
+  // else
+  // {
     Serial.printf("Connecting takes %lums\n", millis() - dt);
-    Serial.println("connection failed");
-    responseCode = 408;
-    response = "";
-    failedRequestCount++;
-  }
-  else
-  {
-    Serial.printf("Connecting takes %lums\n", millis() - dt);
-    // configure traged server and url
-    http.begin(dynamic_cast<WiFiClient &>(*client), URL); //HTTP
+    // configure target server and url
+    http.begin(client, URL); //HTTP
     http.addHeader(F("Content-Type"), F("application/json"));
     http.addHeader(F("Device-Token"), storedDeviceToken);
     http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
@@ -1779,7 +1763,7 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
       Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
     }
     http.end();
-  }
+  // }
 }
 
 bool isWifiConnected()
@@ -2034,7 +2018,6 @@ void pgAccInfo()
     {
       Serial.println("Successfully fetching NTP Clock!");
       rtc.adjust(DateTime(timeClient.getEpochTime()));
-      client->setX509Time(timeClient.getEpochTime());
     }
     else
     {
@@ -2065,7 +2048,6 @@ void pgAccInfo()
       }
       else
       {
-        client->setX509Time(rtc.now().unixtime());
         Serial.printf("Initializing client x509 time RTC : %lu", rtc.now().unixtime());
       }
     }
