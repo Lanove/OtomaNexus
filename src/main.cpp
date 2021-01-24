@@ -185,6 +185,8 @@ bool disconnectFlag,
 float newTemp,
     newHumid;
 
+bool hysteresisBuffer[30];
+
 byte progTrig[30],
     progRB1[30][4],
     progRB2[30][4],
@@ -255,6 +257,7 @@ const String freeSketch = String(ESP.getFreeSketchSpace()),
 
 void setup(void)
 {
+  std::fill_n(hysteresisBuffer, 30, false);
   Serial.begin(74880); // Start the Serial communication to send messages to the computer
   Serial.printf(
       "freeSketch : %s\nsketchSize : %s\nchipSize : %s\nsketchMD5 : %s\n", freeSketch.c_str(), sketchSize.c_str(), chipSize.c_str(), sketchMD5.c_str());
@@ -813,6 +816,11 @@ void programScan(void)
 {
   if (programStarted)
   {
+    bool statusBuffer[10];
+    statusBuffer[0] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
+    statusBuffer[1] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
+    statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX3_STATUS);
+    statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX4_STATUS);
     encoderUpdate(dir, bs, ev, dt); //
     if (millis() - lcdUpdateMillis >= LCD_UPDATE_INTERVAL)
     {
@@ -852,7 +860,7 @@ void programScan(void)
         lcdCursor = encUpperLimit;
     }
 
-    if (bs == ENC_DBCLICKED)
+    if (bs == ENC_CLICKED)
     { // Navigation
       if (lcdScreen == 1)
         lcdTransition(2);
@@ -866,14 +874,6 @@ void programScan(void)
           lcdTransition(7);
         else if (lcdCursor == 3)
           lcdTransition(1);
-        else if (lcdCursor == 4)
-        {
-          statusBuzzer.on();
-          delay(500);
-          statusBuzzer.off();
-          delay(100);
-          ESP.restart();
-        }
       }
       else if (lcdScreen == 3)
       {
@@ -911,14 +911,21 @@ void programScan(void)
       else if (lcdScreen == 9)
         lcdTransition(8);
     }
-
+    if (bs == ENC_DBCLICKED)
+    {
+      if (lcdScreen == 2 && lcdCursor == 4)
+      {
+        statusBuzzer.on();
+        delay(500);
+        statusBuzzer.off();
+        delay(100);
+        ESP.restart();
+      }
+      if (lcdScreen == 3)
+        statusBuffer[lcdCursor] = !statusBuffer[lcdCursor];
+    }
     statusLED.update();
     statusBuzzer.update();
-    bool statusBuffer[10];
-    statusBuffer[0] = bitRead(deviceStatus, BITPOS_AUX1_STATUS);
-    statusBuffer[1] = bitRead(deviceStatus, BITPOS_AUX2_STATUS);
-    statusBuffer[2] = bitRead(deviceStatus, BITPOS_AUX3_STATUS);
-    statusBuffer[3] = bitRead(deviceStatus, BITPOS_AUX4_STATUS);
 
     for (int i = 0; i < 30; i++)
     {
@@ -1039,12 +1046,11 @@ void programScan(void)
           float aturKe, toleransi;
           memcpy(&aturKe, &progRB1[i], sizeof(float));
           memcpy(&toleransi, &progRB2[i], sizeof(float));
-          bool hysteresisBuffer;
           if (((progTrig[i] == 6 || progTrig[i] == 7) ? newTemp : newHumid) > aturKe + (toleransi / 2))
-            hysteresisBuffer = ((progTrig[i] == 7) ? MURUP : MATI);
+            hysteresisBuffer[i] = ((progTrig[i] == 7) ? MURUP : MATI);
           else if (((progTrig[i] == 6 || progTrig[i] == 7) ? newTemp : newHumid) < aturKe - (toleransi / 2))
-            hysteresisBuffer = ((progTrig[i] == 7) ? MATI : MURUP);
-          statusBuffer[progAct[i]] = hysteresisBuffer;
+            hysteresisBuffer[i] = ((progTrig[i] == 7) ? MATI : MURUP);
+          statusBuffer[progAct[i]] = hysteresisBuffer[i];
         }
       }
     }
@@ -1097,11 +1103,11 @@ void lcdTransition(int screen, int progNum)
     lcd.print(LCD_ARROW);
     lcd.printf("Output      Back");
     lcd.setCursor(1, 1);
-    lcd.printf("            Restart");
+    lcd.printf("Program     Restart");
     lcd.setCursor(1, 2);
-    lcd.printf("Program  %02d/%02d/%04d", now.day(), now.month(), now.year());
+    lcd.printf("Info     %02d/%02d/%04d", now.day(), now.month(), now.year());
     lcd.setCursor(1, 3);
-    lcd.printf("Info      %02d:%02d:%02d", now.hour(), now.minute(), now.second());
+    lcd.printf("          %02d:%02d:%02d", now.hour(), now.minute(), now.second());
   }
   else if (screen == 3)
   {
@@ -1236,14 +1242,16 @@ void lcdTransition(int screen, int progNum)
       lcd.printf("%s", (progRB1[progNum][0] == 1) ? "Output 1" : (progRB1[progNum][0] == 2) ? "Output 2" : (progRB1[progNum][0] == 3) ? "Pemanas" : (progRB1[progNum][0] == 4) ? "Pendingin" : (progRB1[progNum][0] == 5) ? "Thermocontrol" : "null");
       lcd.setCursor(0, 2);
       lcd.printf("%s", (progRB2[progNum][0] == 1) ? "Menyala" : (progRB2[progNum][0] == 2) ? "Mati" : "null");
-    }else if (progTrig[progNum] == 6 ||progTrig[progNum] == 7 ||progTrig[progNum] == 8){
-      float keValue,tlrsiValue;
+    }
+    else if (progTrig[progNum] == 6 || progTrig[progNum] == 7 || progTrig[progNum] == 8)
+    {
+      float keValue, tlrsiValue;
       memcpy(&keValue, &progRB1[progNum], sizeof(float));
       memcpy(&tlrsiValue, &progRB2[progNum], sizeof(float));
-      lcd.setCursor(0,1);
-      lcd.printf("Ke: %04.1f",keValue);
-      lcd.setCursor(0,2);
-      lcd.printf("Toleransi: %04.1f",tlrsiValue);
+      lcd.setCursor(0, 1);
+      lcd.printf("Ke: %04.1f", keValue);
+      lcd.setCursor(0, 2);
+      lcd.printf("Toleransi: %04.1f", tlrsiValue);
     }
     lcd.setCursor(0, 3);
     lcd.printf("Aksi:%s", (progAct[progNum] == 1) ? "Ny Out1" : (progAct[progNum] == 2) ? "Ny Out2" : (progAct[progNum] == 3) ? "Ny Pmns" : (progAct[progNum] == 4) ? "Ny Pndn" : (progAct[progNum] == 5) ? "Ny Thco" : (progAct[progNum] == 6) ? "Mt Out1" : (progAct[progNum] == 7) ? "Mt Out2" : (progAct[progNum] == 8) ? "Mt Pmns" : (progAct[progNum] == 9) ? "Mt Pndn" : (progAct[progNum] == 10) ? "Mt Thco" : "null");
@@ -1286,9 +1294,9 @@ void lcdUpdate()
     {
       lcd.setCursor(0, 0);
       lcd.print(" ");
-      lcd.setCursor(0, 2);
+      lcd.setCursor(0, 1);
       lcd.print(" ");
-      lcd.setCursor(0, 3);
+      lcd.setCursor(0, 2);
       lcd.print(" ");
       lcd.setCursor(12, 0);
       lcd.print(" ");
@@ -1297,9 +1305,9 @@ void lcdUpdate()
       if (lcdCursor == 0)
         lcd.setCursor(0, 0);
       else if (lcdCursor == 1)
-        lcd.setCursor(0, 2);
+        lcd.setCursor(0, 1);
       else if (lcdCursor == 2)
-        lcd.setCursor(0, 3);
+        lcd.setCursor(0, 2);
       else if (lcdCursor == 3)
         lcd.setCursor(12, 0);
       else if (lcdCursor == 4)
@@ -1341,23 +1349,23 @@ void lcdUpdate()
     }
     if (prev_outStatus[0] != bitRead(deviceStatus, BITPOS_AUX1_STATUS))
     {
-      lcd.setCursor(9, 0);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == MURUP) ? "ON" : "OFF");
+      lcd.setCursor(10, 0);
+      lcd.printf("%s ", (bitRead(deviceStatus, BITPOS_AUX1_STATUS) == MURUP) ? "ON" : "OFF");
     }
     if (prev_outStatus[1] != bitRead(deviceStatus, BITPOS_AUX2_STATUS))
     {
-      lcd.setCursor(9, 1);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == MURUP) ? "ON" : "OFF");
+      lcd.setCursor(10, 1);
+      lcd.printf("%s ", (bitRead(deviceStatus, BITPOS_AUX2_STATUS) == MURUP) ? "ON" : "OFF");
     }
     if (prev_outStatus[2] != bitRead(deviceStatus, BITPOS_AUX3_STATUS))
     {
-      lcd.setCursor(9, 2);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX3_STATUS) == MURUP) ? "ON" : "OFF");
+      lcd.setCursor(10, 2);
+      lcd.printf("%s ", (bitRead(deviceStatus, BITPOS_AUX3_STATUS) == MURUP) ? "ON" : "OFF");
     }
     if (prev_outStatus[3] != bitRead(deviceStatus, BITPOS_AUX4_STATUS))
     {
-      lcd.setCursor(9, 3);
-      lcd.printf("%s", (bitRead(deviceStatus, BITPOS_AUX4_STATUS) == MURUP) ? "ON" : "OFF");
+      lcd.setCursor(10, 3);
+      lcd.printf("%s ", (bitRead(deviceStatus, BITPOS_AUX4_STATUS) == MURUP) ? "ON" : "OFF");
     }
   }
   else if (lcdScreen == 8)
@@ -1735,42 +1743,42 @@ void fetchURL(const String &URL, const String &data, int &responseCode, String &
   // }
   // else
   // {
-    Serial.printf("Connecting takes %lums\n", millis() - dt);
-    // configure target server and url
-    http.begin(client, URL); //HTTP
-    http.addHeader(F("Content-Type"), F("application/json"));
-    http.addHeader(F("Device-Token"), storedDeviceToken);
-    http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
-    http.addHeader(F("ESP8266-SDK-VERSION"), String(ESP.getSdkVersion()));
-    http.addHeader(F("ESP8266-CORE-VERSION"), ESP.getCoreVersion());
-    http.addHeader(F("ESP8266-MAC"), WiFi.macAddress());
-    http.addHeader(F("ESP8266-SKETCH-MD5"), sketchMD5);
-    http.addHeader(F("ESP8266-SKETCH-FREE-SPACE"), freeSketch);
-    http.addHeader(F("ESP8266-SKETCH-SIZE"), sketchSize);
-    http.addHeader(F("ESP8266-CHIP-SIZE"), chipSize);
-    dt = millis();
-    // start connection and send HTTP header and body
-    int httpCode = http.POST(data);
-    Serial.printf("POST HTTP Takes %lums\n", millis() - dt);
-    dt = millis();
-    responseCode = httpCode;
-    // httpCode will be negative on error
-    if (httpCode > 0)
+  Serial.printf("Connecting takes %lums\n", millis() - dt);
+  // configure target server and url
+  http.begin(client, URL); //HTTP
+  http.addHeader(F("Content-Type"), F("application/json"));
+  http.addHeader(F("Device-Token"), storedDeviceToken);
+  http.addHeader(F("ESP8266-BUILD-VERSION"), F(BUILD_VERSION));
+  http.addHeader(F("ESP8266-SDK-VERSION"), String(ESP.getSdkVersion()));
+  http.addHeader(F("ESP8266-CORE-VERSION"), ESP.getCoreVersion());
+  http.addHeader(F("ESP8266-MAC"), WiFi.macAddress());
+  http.addHeader(F("ESP8266-SKETCH-MD5"), sketchMD5);
+  http.addHeader(F("ESP8266-SKETCH-FREE-SPACE"), freeSketch);
+  http.addHeader(F("ESP8266-SKETCH-SIZE"), sketchSize);
+  http.addHeader(F("ESP8266-CHIP-SIZE"), chipSize);
+  dt = millis();
+  // start connection and send HTTP header and body
+  int httpCode = http.POST(data);
+  Serial.printf("POST HTTP Takes %lums\n", millis() - dt);
+  dt = millis();
+  responseCode = httpCode;
+  // httpCode will be negative on error
+  if (httpCode > 0)
+  {
+    // HTTP header has been send and Server response header has been handled
+    // file found at server
+    if (httpCode == HTTP_CODE_OK)
     {
-      // HTTP header has been send and Server response header has been handled
-      // file found at server
-      if (httpCode == HTTP_CODE_OK)
-      {
-        successRequestCount++;
-        response = http.getString();
-      }
+      successRequestCount++;
+      response = http.getString();
     }
-    else
-    {
-      failedRequestCount++;
-      Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
-    }
-    http.end();
+  }
+  else
+  {
+    failedRequestCount++;
+    Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+  http.end();
   // }
 }
 

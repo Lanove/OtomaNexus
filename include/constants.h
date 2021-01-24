@@ -107,11 +107,11 @@
 // #define MODE_HYSTERESIS 1 DEPRECATED
 // #define MODE_OPERATION_MANUAL 0 DEPRECATED
 // #define MODE_OPERATION_AUTO 1 DEPRECATED
-const char baseUri[] = "192.168.7.112";
+const char baseUri[] = "192.168.2.110";
 const int httpPort = 8080;
-static const char espUpdater[] PROGMEM = "http://192.168.7.112:8080/otoma/api/ESPUpdater.php";
-static const char requestURL[] PROGMEM = "http://192.168.7.112:8080/otoma/api/nexusControllerRequest.php";
-static const char identifyURL[] PROGMEM = "http://192.168.7.112:8080/otoma/api/identifyDevice.php";
+static const char espUpdater[] PROGMEM = "http://192.168.2.110:8080/otoma/api/ESPUpdater.php";
+static const char requestURL[] PROGMEM = "http://192.168.2.110:8080/otoma/api/nexusControllerRequest.php";
+static const char identifyURL[] PROGMEM = "http://192.168.2.110:8080/otoma/api/identifyDevice.php";
 // This is the minified file of html document to reduce flash usage
 // minified is 4857 byte
 // unminified is 6358 byte, which is 23.6% saving!
