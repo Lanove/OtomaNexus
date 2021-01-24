@@ -985,9 +985,9 @@ void programScan(void)
               else if (progFlag[i])
               {
                 if (progAct[i] < 5)
-                  statusBuffer[progAct[i] - 1] = MURUP;
+                  statusBuffer[progAct[i] - 1] = MATI;
                 else if (progAct[i] >= 5)
-                  statusBuffer[progAct[i] - 5] = MATI;
+                  statusBuffer[progAct[i] - 5] = MURUP;
                 progFlag[i] = false;
               }
             }
@@ -1007,9 +1007,9 @@ void programScan(void)
             else if (progFlag[i])
             {
               if (progAct[i] < 5)
-                statusBuffer[progAct[i] - 1] = MURUP;
+                statusBuffer[progAct[i] - 1] = MATI;
               else if (progAct[i] >= 5)
-                statusBuffer[progAct[i] - 5] = MATI;
+                statusBuffer[progAct[i] - 5] = MURUP;
               progFlag[i] = false;
             }
           }
@@ -1046,6 +1046,10 @@ void programScan(void)
           float aturKe, toleransi;
           memcpy(&aturKe, &progRB1[i], sizeof(float));
           memcpy(&toleransi, &progRB2[i], sizeof(float));
+          if (aturKe == 0.0)
+            aturKe = 0.1;
+          if (toleransi == 0.0)
+            toleransi = 0.1;
           if (((progTrig[i] == 6 || progTrig[i] == 7) ? newTemp : newHumid) > aturKe + (toleransi / 2))
             hysteresisBuffer[i] = ((progTrig[i] == 7) ? MURUP : MATI);
           else if (((progTrig[i] == 6 || progTrig[i] == 7) ? newTemp : newHumid) < aturKe - (toleransi / 2))
@@ -1248,6 +1252,10 @@ void lcdTransition(int screen, int progNum)
       float keValue, tlrsiValue;
       memcpy(&keValue, &progRB1[progNum], sizeof(float));
       memcpy(&tlrsiValue, &progRB2[progNum], sizeof(float));
+      if (keValue == 0.0)
+        keValue = 0.1;
+      if (tlrsiValue == 0.0)
+        tlrsiValue = 0.1;
       lcd.setCursor(0, 1);
       lcd.printf("Ke: %04.1f", keValue);
       lcd.setCursor(0, 2);
