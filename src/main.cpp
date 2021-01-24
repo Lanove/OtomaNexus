@@ -339,7 +339,7 @@ void setup(void)
   loadInfo();
   //75753us
   //512006us
-  // http.setReuse(true);
+  http.setReuse(true);
   if (ds18b.getDS18Count() == 0)
   {
     if (!bitReadFB(FB_DS_NF1))
@@ -866,7 +866,7 @@ void programScan(void)
           lcdTransition(7);
         else if (lcdCursor == 3)
           lcdTransition(1);
-        else if (lcdCursor == 5)
+        else if (lcdCursor == 4)
         {
           statusBuzzer.on();
           delay(500);
@@ -1097,7 +1097,7 @@ void lcdTransition(int screen, int progNum)
     lcd.print(LCD_ARROW);
     lcd.printf("Output      Back");
     lcd.setCursor(1, 1);
-    lcd.printf("Therco      Restart");
+    lcd.printf("            Restart");
     lcd.setCursor(1, 2);
     lcd.printf("Program  %02d/%02d/%04d", now.day(), now.month(), now.year());
     lcd.setCursor(1, 3);
@@ -1200,7 +1200,7 @@ void lcdTransition(int screen, int progNum)
   else if (screen == 9)
   {
     lcd.setCursor(0, 0);
-    lcd.printf("Pemicu:%s", (progTrig[progNum] == 1) ? "Suhu" : (progTrig[progNum] == 2) ? "Humidts" : (progTrig[progNum] == 3) ? "Jdwlhrn" : (progTrig[progNum] == 4) ? "TglWktu" : (progTrig[progNum] == 5) ? "Keadaan" : "null");
+    lcd.printf("Pemicu:%s", (progTrig[progNum] == 1) ? "Suhu" : (progTrig[progNum] == 2) ? "Humidts" : (progTrig[progNum] == 3) ? "Jdwlhrn" : (progTrig[progNum] == 4) ? "TglWktu" : (progTrig[progNum] == 5) ? "Keadaan" : (progTrig[progNum] == 6) ? "Pemanas" : (progTrig[progNum] == 7) ? "Pendingin" : (progTrig[progNum] == 8) ? "Hmdfier" : "null");
     lcd.setCursor(0, 1);
     if (progTrig[progNum] == 1 || progTrig[progNum] == 2)
     {
@@ -1236,6 +1236,14 @@ void lcdTransition(int screen, int progNum)
       lcd.printf("%s", (progRB1[progNum][0] == 1) ? "Output 1" : (progRB1[progNum][0] == 2) ? "Output 2" : (progRB1[progNum][0] == 3) ? "Pemanas" : (progRB1[progNum][0] == 4) ? "Pendingin" : (progRB1[progNum][0] == 5) ? "Thermocontrol" : "null");
       lcd.setCursor(0, 2);
       lcd.printf("%s", (progRB2[progNum][0] == 1) ? "Menyala" : (progRB2[progNum][0] == 2) ? "Mati" : "null");
+    }else if (progTrig[progNum] == 6 ||progTrig[progNum] == 7 ||progTrig[progNum] == 8){
+      float keValue,tlrsiValue;
+      memcpy(&keValue, &progRB1[progNum], sizeof(float));
+      memcpy(&tlrsiValue, &progRB2[progNum], sizeof(float));
+      lcd.setCursor(0,1);
+      lcd.printf("Ke: %04.1f",keValue);
+      lcd.setCursor(0,2);
+      lcd.printf("Toleransi: %04.1f",tlrsiValue);
     }
     lcd.setCursor(0, 3);
     lcd.printf("Aksi:%s", (progAct[progNum] == 1) ? "Ny Out1" : (progAct[progNum] == 2) ? "Ny Out2" : (progAct[progNum] == 3) ? "Ny Pmns" : (progAct[progNum] == 4) ? "Ny Pndn" : (progAct[progNum] == 5) ? "Ny Thco" : (progAct[progNum] == 6) ? "Mt Out1" : (progAct[progNum] == 7) ? "Mt Out2" : (progAct[progNum] == 8) ? "Mt Pmns" : (progAct[progNum] == 9) ? "Mt Pndn" : (progAct[progNum] == 10) ? "Mt Thco" : "null");
