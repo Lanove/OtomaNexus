@@ -317,7 +317,7 @@ void setup(void)
     writeToEEPROM(SOFTPW, "12121313");
     writeToEEPROM(USERNAME, " ");
     writeToEEPROM(USERPASS, " ");
-    writeToEEPROM(DEVICETOKEN, "4f6YqT9GdI");
+    writeToEEPROM(DEVICETOKEN, "1MC2BDiZQR");
     /*
     4f6YqT9GdI
     dNLxiQAUAL

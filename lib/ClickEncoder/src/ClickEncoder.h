@@ -186,7 +186,7 @@ class AnalogButton : public ClickEncoder
 class DigitalButton : public ClickEncoder
 { 
   public:
-    explicit DigitalButton(int8_t BTN, bool active = false);  // Constructor for using a button only
+    explicit DigitalButton(int8_t BTN, bool pullUpEnabled, bool active = false);  // Constructor for using a button only
 };
 
 #endif
